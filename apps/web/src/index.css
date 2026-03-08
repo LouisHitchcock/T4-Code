@@ -717,8 +717,13 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown .chat-markdown-shiki .shiki {
-  background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
   font-family: var(--font-code-snippet) !important;
+}
+
+:root[data-theme="t3-chat-theme"] .chat-markdown .chat-markdown-shiki .shiki {
+  background: #18111f !important;
+  border-color: #3d2744;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
 .chat-markdown .chat-markdown-shiki .shiki code {
