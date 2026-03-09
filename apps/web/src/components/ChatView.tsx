@@ -5722,10 +5722,7 @@ function getCustomModelOptionsByProvider(
   configuredModelsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>,
 ): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
-    codex: mergeModelOptions(
-      getAppModelOptions("codex", settings.customCodexModels),
-      configuredModelsByProvider.codex,
-    ),
+    codex: getAppModelOptions("codex", settings.customCodexModels),
     copilot: mergeModelOptions(
       getAppModelOptions("copilot", settings.customCopilotModels),
       configuredModelsByProvider.copilot,

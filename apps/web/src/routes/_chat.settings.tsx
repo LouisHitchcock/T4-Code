@@ -54,13 +54,6 @@ const MODEL_PROVIDER_SETTINGS: Array<{
   example: string;
 }> = [
   {
-    provider: "codex",
-    title: "Codex",
-    description: "Save additional Codex model slugs for the picker and `/model` command.",
-    placeholder: "your-codex-model-slug",
-    example: "gpt-6.7-codex-ultra-preview",
-  },
-  {
     provider: "copilot",
     title: "GitHub Copilot",
     description: "Save additional Copilot model slugs for the picker and `/model` command.",
@@ -576,8 +569,9 @@ function SettingsRouteView() {
               <div className="mb-4">
                 <h2 className="text-sm font-medium text-foreground">Models</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Save additional provider model slugs so they appear in the chat model picker and
-                  `/model` command suggestions.
+                  Save additional provider model slugs for supported providers so they appear in
+                  the chat model picker and `/model` command suggestions. Codex uses the built-in
+                  catalog only.
                 </p>
               </div>
 
