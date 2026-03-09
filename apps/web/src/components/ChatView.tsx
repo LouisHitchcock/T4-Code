@@ -153,9 +153,9 @@ import {
   LockOpenIcon,
   Undo2Icon,
   XIcon,
+  ZapIcon,
   CopyIcon,
   CheckIcon,
-  ZapIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -230,6 +230,7 @@ import {
   useComposerDraftStore,
   useComposerThreadDraft,
 } from "../composerDraftStore";
+import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { clamp } from "effect/Number";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
@@ -727,6 +728,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     useState<Record<string, number>>({});
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -1150,6 +1152,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
+  const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
   useEffect(() => {
     if (!activePendingProgress) {
       return;
@@ -1894,6 +1897,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
+  const toggleRuntimeMode = useCallback(() => {
+    void handleRuntimeModeChange(
+      runtimeMode === "full-access" ? "approval-required" : "full-access",
+    );
+  }, [handleRuntimeModeChange, runtimeMode]);
+  const togglePlanSidebar = useCallback(() => {
+    setPlanSidebarOpen((open) => {
+      if (open) {
+        const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
+        if (turnKey) {
+          planSidebarDismissedForTurnRef.current = turnKey;
+        }
+      } else {
+        planSidebarDismissedForTurnRef.current = null;
+      }
+      return !open;
+    });
+  }, [activePlan?.turnId, activeProposedPlan?.turnId]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -1995,6 +2016,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         "button, summary, [role='button'], [data-scroll-anchor-target]",
       );
       if (!trigger || !scrollContainer.contains(trigger)) return;
+      if (trigger.closest("[data-scroll-anchor-ignore]")) return;
 
       pendingInteractionAnchorRef.current = {
         element: trigger,
@@ -2109,13 +2131,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useLayoutEffect(() => {
     const composerForm = composerFormRef.current;
     if (!composerForm) return;
+    const measureComposerFormWidth = () => composerForm.clientWidth;
 
     composerFormHeightRef.current = composerForm.getBoundingClientRect().height;
+    setIsComposerFooterCompact(
+      shouldUseCompactComposerFooter(measureComposerFormWidth(), {
+        hasWideActions: composerFooterHasWideActions,
+      }),
+    );
     if (typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver((entries) => {
       const [entry] = entries;
       if (!entry) return;
+
+      const nextCompact = shouldUseCompactComposerFooter(measureComposerFormWidth(), {
+        hasWideActions: composerFooterHasWideActions,
+      });
+      setIsComposerFooterCompact((previous) => (previous === nextCompact ? previous : nextCompact));
 
       const nextHeight = entry.contentRect.height;
       const previousHeight = composerFormHeightRef.current;
@@ -2130,7 +2163,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return () => {
       observer.disconnect();
     };
-  }, [activeThread?.id, scheduleStickToBottom]);
+  }, [activeThread?.id, composerFooterHasWideActions, scheduleStickToBottom]);
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
@@ -3743,7 +3776,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
       {/* Main content area with optional plan sidebar */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
 
@@ -3955,10 +3988,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 />
               </div>
             ) : (
-              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-3">
-                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible">
+              <div
+                data-chat-composer-footer="true"
+                className={cn(
+                  "flex items-center justify-between px-2.5 pb-2.5 sm:px-3 sm:pb-3",
+                  isComposerFooterCompact ? "gap-1.5" : "flex-wrap gap-2 sm:flex-nowrap sm:gap-0",
+                )}
+              >
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center",
+                    isComposerFooterCompact
+                      ? "gap-1 overflow-hidden"
+                      : "gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible",
+                  )}
+                >
                   {/* Provider/model picker */}
                   <ProviderModelPicker
+                    compact={isComposerFooterCompact}
                     provider={selectedProvider}
                     model={selectedModelForPickerWithCustomFallback}
                     lockedProvider={lockedProvider}
@@ -3967,114 +4014,117 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     onProviderModelChange={onProviderModelSelect}
                   />
 
-                  {supportsReasoningEffort && selectedEffort != null ? (
+                  {isComposerFooterCompact ? (
+                    <CompactComposerControlsMenu
+                      activePlan={Boolean(activePlan || activeProposedPlan || planSidebarOpen)}
+                      interactionMode={interactionMode}
+                      planSidebarOpen={planSidebarOpen}
+                      runtimeMode={runtimeMode}
+                      selectedEffort={selectedEffort}
+                      selectedProvider={selectedProvider}
+                      selectedCodexFastModeEnabled={selectedCodexFastModeEnabled}
+                      reasoningOptions={reasoningOptions}
+                      onEffortSelect={onEffortSelect}
+                      onCodexFastModeChange={onCodexFastModeChange}
+                      onToggleInteractionMode={toggleInteractionMode}
+                      onTogglePlanSidebar={togglePlanSidebar}
+                      onToggleRuntimeMode={toggleRuntimeMode}
+                    />
+                  ) : (
                     <>
+                      {supportsReasoningEffort && selectedEffort != null ? (
+                        <>
+                          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                          {selectedProvider === "codex" ? (
+                            <CodexTraitsPicker
+                              effort={selectedEffort}
+                              fastModeEnabled={selectedCodexFastModeEnabled}
+                              options={reasoningOptions}
+                              onEffortChange={onEffortSelect}
+                              onFastModeChange={onCodexFastModeChange}
+                            />
+                          ) : (
+                            <ReasoningTraitsPicker
+                              effort={selectedEffort}
+                              defaultReasoningEffort={getDefaultReasoningEffort(selectedProvider)}
+                              options={reasoningOptions}
+                              onEffortChange={onEffortSelect}
+                            />
+                          )}
+                        </>
+                      ) : null}
+
                       <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-                      <ReasoningTraitsPicker
-                        effort={selectedEffort}
-                        defaultReasoningEffort={
-                          selectedProvider === "codex" ? getDefaultReasoningEffort("codex") : null
-                        }
-                        options={reasoningOptions}
-                        onEffortChange={onEffortSelect}
-                        {...(selectedProvider === "codex"
-                          ? {
-                              fastModeEnabled: selectedCodexFastModeEnabled,
-                              onFastModeChange: onCodexFastModeChange,
-                            }
-                          : {})}
-                      />
-                    </>
-                  ) : null}
 
-                  {/* Divider */}
-                  <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
-                  {/* Interaction mode toggle */}
-                  <Button
-                    variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                    size="sm"
-                    type="button"
-                    onClick={toggleInteractionMode}
-                    title={
-                      interactionMode === "plan"
-                        ? "Plan mode — click to return to normal chat mode"
-                        : "Default mode — click to enter plan mode"
-                    }
-                  >
-                    <BotIcon />
-                    <span className="sr-only sm:not-sr-only">
-                      {interactionMode === "plan" ? "Plan" : "Chat"}
-                    </span>
-                  </Button>
-
-                  {/* Divider */}
-                  <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
-                  {/* Runtime mode toggle */}
-                  <Button
-                    variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                    size="sm"
-                    type="button"
-                    onClick={() =>
-                      void handleRuntimeModeChange(
-                        runtimeMode === "full-access" ? "approval-required" : "full-access",
-                      )
-                    }
-                    title={
-                      runtimeMode === "full-access"
-                        ? "Full access — click to require approvals"
-                        : "Approval required — click for full access"
-                    }
-                  >
-                    {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
-                    <span className="sr-only sm:not-sr-only">
-                      {runtimeMode === "full-access" ? "Full access" : "Supervised"}
-                    </span>
-                  </Button>
-
-                  {/* Plan sidebar toggle */}
-                  {(activePlan || activeProposedPlan || planSidebarOpen) ? (
-                    <>
-                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
                       <Button
                         variant="ghost"
-                        className={cn(
-                          "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                          planSidebarOpen
-                            ? "text-blue-400 hover:text-blue-300"
-                            : "text-muted-foreground/70 hover:text-foreground/80",
-                        )}
+                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
                         size="sm"
                         type="button"
-                        onClick={() => {
-                          setPlanSidebarOpen((open) => {
-                            if (open) {
-                              // Closing: track dismissal for current turn
-                              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
-                              if (turnKey) {
-                                planSidebarDismissedForTurnRef.current = turnKey;
-                              }
-                            } else {
-                              // Re-opening: clear dismissal tracking
-                              planSidebarDismissedForTurnRef.current = null;
-                            }
-                            return !open;
-                          });
-                        }}
-                        title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+                        onClick={toggleInteractionMode}
+                        title={
+                          interactionMode === "plan"
+                            ? "Plan mode — click to return to normal chat mode"
+                            : "Default mode — click to enter plan mode"
+                        }
                       >
-                        <ListTodoIcon />
-                        <span className="sr-only sm:not-sr-only">Plan</span>
+                        <BotIcon />
+                        <span className="sr-only sm:not-sr-only">
+                          {interactionMode === "plan" ? "Plan" : "Chat"}
+                        </span>
                       </Button>
+
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
+                      <Button
+                        variant="ghost"
+                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                        size="sm"
+                        type="button"
+                        onClick={() =>
+                          void handleRuntimeModeChange(
+                            runtimeMode === "full-access" ? "approval-required" : "full-access",
+                          )
+                        }
+                        title={
+                          runtimeMode === "full-access"
+                            ? "Full access — click to require approvals"
+                            : "Approval required — click for full access"
+                        }
+                      >
+                        {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
+                        <span className="sr-only sm:not-sr-only">
+                          {runtimeMode === "full-access" ? "Full access" : "Supervised"}
+                        </span>
+                      </Button>
+
+                      {(activePlan || activeProposedPlan || planSidebarOpen) ? (
+                        <>
+                          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                          <Button
+                            variant="ghost"
+                            className={cn(
+                              "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                              planSidebarOpen
+                                ? "text-blue-400 hover:text-blue-300"
+                                : "text-muted-foreground/70 hover:text-foreground/80",
+                            )}
+                            size="sm"
+                            type="button"
+                            onClick={togglePlanSidebar}
+                            title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+                          >
+                            <ListTodoIcon />
+                            <span className="sr-only sm:not-sr-only">Plan</span>
+                          </Button>
+                        </>
+                      ) : null}
                     </>
-                  ) : null}
+                  )}
                 </div>
 
                 {/* Right side: send / stop button */}
-                <div className="flex shrink-0 items-center gap-2">
+                <div data-chat-composer-actions="right" className="flex shrink-0 items-center gap-2">
                   {isPreparingWorktree ? (
                     <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
                   ) : null}
@@ -4237,6 +4287,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
         </form>
       </div>
 
+      {isGitRepo && (
+        <BranchToolbar
+          threadId={activeThread.id}
+          onEnvModeChange={onEnvModeChange}
+          envLocked={envLocked}
+          onComposerFocusRequest={scheduleComposerFocus}
+        />
+      )}
+
         </div>{/* end chat column */}
 
         {/* Plan sidebar */}
@@ -4257,15 +4316,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           />
         ) : null}
       </div>{/* end horizontal flex container */}
-
-      {isGitRepo && (
-        <BranchToolbar
-          threadId={activeThread.id}
-          onEnvModeChange={onEnvModeChange}
-          envLocked={envLocked}
-          onComposerFocusRequest={scheduleComposerFocus}
-        />
-      )}
 
       {(() => {
         if (!terminalState.terminalOpen || !activeProject) {
@@ -5152,7 +5202,12 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
         </div>
         {canCollapse ? (
           <div className="mt-4 flex justify-center">
-            <Button size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
+            <Button
+              size="sm"
+              variant="outline"
+              data-scroll-anchor-ignore
+              onClick={() => setExpanded((value) => !value)}
+            >
               {expanded ? "Collapse plan" : "Expand plan"}
             </Button>
           </div>
@@ -6017,6 +6072,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   lockedProvider: ProviderKind | null;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   serviceTierSetting: AppServiceTier;
+  compact?: boolean;
   disabled?: boolean;
   onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
 }) {
@@ -6043,12 +6099,20 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           <Button
             size="sm"
             variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            className={cn(
+              "min-w-0 shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80",
+              props.compact ? "max-w-[10.5rem]" : "sm:px-3",
+            )}
             disabled={props.disabled}
           />
         }
       >
-        <span className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            "flex min-w-0 items-center gap-2",
+            props.compact ? "max-w-[9rem]" : undefined,
+          )}
+        >
           <ProviderIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground/70" />
           {props.provider === "codex" && shouldShowFastTierIcon(props.model, props.serviceTierSetting) ? (
             <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
@@ -6166,6 +6230,126 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   );
 });
 
+const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
+  activePlan: boolean;
+  interactionMode: ProviderInteractionMode;
+  planSidebarOpen: boolean;
+  runtimeMode: RuntimeMode;
+  selectedEffort: CodexReasoningEffort | null;
+  selectedProvider: ProviderKind;
+  selectedCodexFastModeEnabled: boolean;
+  reasoningOptions: ReadonlyArray<CodexReasoningEffort>;
+  onEffortSelect: (effort: CodexReasoningEffort) => void;
+  onCodexFastModeChange: (enabled: boolean) => void;
+  onToggleInteractionMode: () => void;
+  onTogglePlanSidebar: () => void;
+  onToggleRuntimeMode: () => void;
+}) {
+  const defaultReasoningEffort = getDefaultReasoningEffort(props.selectedProvider);
+  const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "Extra High",
+  };
+
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
+            aria-label="More composer controls"
+          />
+        }
+      >
+        <EllipsisIcon aria-hidden="true" className="size-4" />
+      </MenuTrigger>
+      <MenuPopup align="start">
+        {props.selectedEffort != null ? (
+          <>
+            <MenuGroup>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
+              <MenuRadioGroup
+                value={props.selectedEffort}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  const nextEffort = props.reasoningOptions.find((option) => option === value);
+                  if (!nextEffort) return;
+                  props.onEffortSelect(nextEffort);
+                }}
+              >
+                {props.reasoningOptions.map((effort) => (
+                  <MenuRadioItem key={effort} value={effort}>
+                    {reasoningLabelByOption[effort]}
+                    {effort === defaultReasoningEffort ? " (default)" : ""}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+            {props.selectedProvider === "codex" ? (
+              <>
+                <MenuDivider />
+                <MenuGroup>
+                  <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
+                  <MenuRadioGroup
+                    value={props.selectedCodexFastModeEnabled ? "on" : "off"}
+                    onValueChange={(value) => {
+                      props.onCodexFastModeChange(value === "on");
+                    }}
+                  >
+                    <MenuRadioItem value="off">off</MenuRadioItem>
+                    <MenuRadioItem value="on">on</MenuRadioItem>
+                  </MenuRadioGroup>
+                </MenuGroup>
+              </>
+            ) : null}
+            <MenuDivider />
+          </>
+        ) : null}
+        <MenuGroup>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+          <MenuRadioGroup
+            value={props.interactionMode}
+            onValueChange={(value) => {
+              if (!value || value === props.interactionMode) return;
+              props.onToggleInteractionMode();
+            }}
+          >
+            <MenuRadioItem value="default">Chat</MenuRadioItem>
+            <MenuRadioItem value="plan">Plan</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+        <MenuDivider />
+        <MenuGroup>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+          <MenuRadioGroup
+            value={props.runtimeMode}
+            onValueChange={(value) => {
+              if (!value || value === props.runtimeMode) return;
+              props.onToggleRuntimeMode();
+            }}
+          >
+            <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
+            <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+        {props.activePlan ? (
+          <>
+            <MenuDivider />
+            <MenuItem onClick={props.onTogglePlanSidebar}>
+              <ListTodoIcon className="size-4 shrink-0" />
+              {props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+            </MenuItem>
+          </>
+        ) : null}
+      </MenuPopup>
+    </Menu>
+  );
+});
+
 const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
   effort: CodexReasoningEffort;
   defaultReasoningEffort: CodexReasoningEffort | null;
@@ -6244,6 +6428,85 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
             </MenuGroup>
           </>
         ) : null}
+      </MenuPopup>
+    </Menu>
+  );
+});
+
+const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
+  effort: CodexReasoningEffort;
+  fastModeEnabled: boolean;
+  options: ReadonlyArray<CodexReasoningEffort>;
+  onEffortChange: (effort: CodexReasoningEffort) => void;
+  onFastModeChange: (enabled: boolean) => void;
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const defaultReasoningEffort = getDefaultReasoningEffort("codex");
+  const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "Extra High",
+  };
+  const triggerLabel = [
+    reasoningLabelByOption[props.effort],
+    ...(props.fastModeEnabled ? ["Fast"] : []),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <Menu
+      open={isMenuOpen}
+      onOpenChange={(open) => {
+        setIsMenuOpen(open);
+      }}
+    >
+      <MenuTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+          />
+        }
+      >
+        <span>{triggerLabel}</span>
+        <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
+      </MenuTrigger>
+      <MenuPopup align="start">
+        <MenuGroup>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
+          <MenuRadioGroup
+            value={props.effort}
+            onValueChange={(value) => {
+              if (!value) return;
+              const nextEffort = props.options.find((option) => option === value);
+              if (!nextEffort) return;
+              props.onEffortChange(nextEffort);
+            }}
+          >
+            {props.options.map((effort) => (
+              <MenuRadioItem key={effort} value={effort}>
+                {reasoningLabelByOption[effort]}
+                {effort === defaultReasoningEffort ? " (default)" : ""}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
+        <MenuDivider />
+        <MenuGroup>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
+          <MenuRadioGroup
+            value={props.fastModeEnabled ? "on" : "off"}
+            onValueChange={(value) => {
+              props.onFastModeChange(value === "on");
+            }}
+          >
+            <MenuRadioItem value="off">off</MenuRadioItem>
+            <MenuRadioItem value="on">on</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
       </MenuPopup>
     </Menu>
   );

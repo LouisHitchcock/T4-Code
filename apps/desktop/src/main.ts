@@ -31,6 +31,7 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
+import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 
 fixPath();
 
@@ -81,7 +82,13 @@ let restoreStdIoCapture: (() => void) | null = null;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 let windowIconCache: Electron.NativeImage | null | undefined;
-const initialUpdateState = (): DesktopUpdateState => createInitialDesktopUpdateState(app.getVersion());
+const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
+  platform: process.platform,
+  processArch: process.arch,
+  runningUnderArm64Translation: app.runningUnderARM64Translation === true,
+});
+const initialUpdateState = (): DesktopUpdateState =>
+  createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -736,6 +743,7 @@ async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed
   }
   updateDownloadInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
+  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
   console.info("[desktop-updater] Downloading update...");
 
   try {
@@ -774,7 +782,7 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
 function configureAutoUpdater(): void {
   const enabled = shouldEnableAutoUpdates();
   setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion()),
+    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
     enabled,
     status: enabled ? "idle" : "disabled",
   });
@@ -808,7 +816,14 @@ function configureAutoUpdater(): void {
   autoUpdater.channel = DESKTOP_UPDATE_CHANNEL;
   autoUpdater.allowPrerelease = DESKTOP_UPDATE_ALLOW_PRERELEASE;
   autoUpdater.allowDowngrade = false;
+  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
   let lastLoggedDownloadMilestone = -1;
+
+  if (isArm64HostRunningIntelBuild(desktopRuntimeInfo)) {
+    console.info(
+      "[desktop-updater] Apple Silicon host detected while running Intel build; updates will switch to arm64 packages.",
+    );
+  }
 
   autoUpdater.on("checking-for-update", () => {
     console.info("[desktop-updater] Looking for updates...");

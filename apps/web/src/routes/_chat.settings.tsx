@@ -712,7 +712,8 @@ function SettingsRouteView() {
                                   className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2"
                                 >
                                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                                    {provider === "codex" && shouldShowFastTierIcon(slug, codexServiceTier) ? (
+                                    {provider === "codex" &&
+                                    shouldShowFastTierIcon(slug, codexServiceTier) ? (
                                       <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
                                     ) : null}
                                     <code className="min-w-0 flex-1 truncate text-xs text-foreground">
