@@ -81,7 +81,12 @@ function sanitizeLegacyProviderFields(value: unknown): unknown {
   const sanitizedEntries = Object.entries(value).map(([key, entryValue]) => {
     const sanitizedValue = sanitizeLegacyProviderFields(entryValue);
 
-    if (key === "provider" && typeof sanitizedValue === "string" && sanitizedValue !== "codex") {
+    if (
+      key === "provider" &&
+      typeof sanitizedValue === "string" &&
+      sanitizedValue !== "codex" &&
+      sanitizedValue !== "copilot"
+    ) {
       changed = true;
       return [key, "codex"] as const;
     }

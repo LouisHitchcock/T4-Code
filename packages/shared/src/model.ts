@@ -1,8 +1,9 @@
 import {
-  CODEX_REASONING_EFFORT_OPTIONS,
   DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER,
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
+  REASONING_EFFORT_OPTIONS_BY_PROVIDER,
   type CodexReasoningEffort,
   type ModelSlug,
   type ProviderKind,
@@ -12,6 +13,7 @@ type CatalogProvider = keyof typeof MODEL_OPTIONS_BY_PROVIDER;
 
 const MODEL_SLUG_SET_BY_PROVIDER: Record<CatalogProvider, ReadonlySet<ModelSlug>> = {
   codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
+  copilot: new Set(MODEL_OPTIONS_BY_PROVIDER.copilot.map((option) => option.slug)),
 };
 
 export function getModelOptions(provider: ProviderKind = "codex") {
@@ -64,15 +66,14 @@ export function resolveModelSlugForProvider(
 export function getReasoningEffortOptions(
   provider: ProviderKind = "codex",
 ): ReadonlyArray<CodexReasoningEffort> {
-  return provider === "codex" ? CODEX_REASONING_EFFORT_OPTIONS : [];
+  return REASONING_EFFORT_OPTIONS_BY_PROVIDER[provider];
 }
 
-export function getDefaultReasoningEffort(provider: "codex"): CodexReasoningEffort;
 export function getDefaultReasoningEffort(provider: ProviderKind): CodexReasoningEffort | null;
 export function getDefaultReasoningEffort(
   provider: ProviderKind = "codex",
 ): CodexReasoningEffort | null {
-  return provider === "codex" ? "high" : null;
+  return DEFAULT_REASONING_EFFORT_BY_PROVIDER[provider];
 }
 
-export { CODEX_REASONING_EFFORT_OPTIONS };
+export { REASONING_EFFORT_OPTIONS_BY_PROVIDER };

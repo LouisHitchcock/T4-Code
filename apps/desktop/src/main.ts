@@ -1221,7 +1221,9 @@ async function bootstrap(): Promise<void> {
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
   process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
-  writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
+  writeDesktopLogHeader(
+    `bootstrap resolved websocket url=ws://127.0.0.1:${backendPort}/?token=[redacted]`,
+  );
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");

@@ -60,6 +60,13 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "your-codex-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
   },
+  {
+    provider: "copilot",
+    title: "GitHub Copilot",
+    description: "Save additional Copilot model slugs for the picker and `/model` command.",
+    placeholder: "your-copilot-model-slug",
+    example: "claude-sonnet-4.6",
+  },
 ] as const;
 
 const VISIBLE_CUSTOM_THEME_PRESET_LABELS = CUSTOM_THEME_OPTIONS.filter(
@@ -84,8 +91,9 @@ function getCustomModelsForProvider(
 ) {
   switch (provider) {
     case "codex":
-    default:
       return settings.customCodexModels;
+    case "copilot":
+      return settings.customCopilotModels;
   }
 }
 
@@ -95,16 +103,18 @@ function getDefaultCustomModelsForProvider(
 ) {
   switch (provider) {
     case "codex":
-    default:
       return defaults.customCodexModels;
+    case "copilot":
+      return defaults.customCopilotModels;
   }
 }
 
 function patchCustomModels(provider: ProviderKind, models: string[]) {
   switch (provider) {
     case "codex":
-    default:
       return { customCodexModels: models };
+    case "copilot":
+      return { customCopilotModels: models };
   }
 }
 
@@ -126,6 +136,7 @@ function SettingsRouteView() {
     Record<ProviderKind, string>
   >({
     codex: "",
+    copilot: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -133,6 +144,7 @@ function SettingsRouteView() {
 
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
+  const copilotBinaryPath = settings.copilotBinaryPath;
   const codexServiceTier = settings.codexServiceTier;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const selectedCustomTheme = CUSTOM_THEME_OPTIONS_BY_ID[customThemeId];
@@ -428,6 +440,52 @@ function SettingsRouteView() {
                     }
                   >
                     Reset codex overrides
+                  </Button>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">GitHub Copilot CLI</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This override applies to new Copilot sessions and lets you use a non-default
+                  <code> copilot</code> install.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <label htmlFor="copilot-binary-path" className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">Copilot binary path</span>
+                  <Input
+                    id="copilot-binary-path"
+                    value={copilotBinaryPath}
+                    onChange={(event) => updateSettings({ copilotBinaryPath: event.target.value })}
+                    placeholder="copilot"
+                    spellCheck={false}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Leave blank to use <code>copilot</code> from your PATH.
+                  </span>
+                </label>
+
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <p>
+                    Binary source:{" "}
+                    <span className="font-medium text-foreground">
+                      {copilotBinaryPath || "PATH"}
+                    </span>
+                  </p>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() =>
+                      updateSettings({
+                        copilotBinaryPath: defaults.copilotBinaryPath,
+                      })
+                    }
+                  >
+                    Reset copilot overrides
                   </Button>
                 </div>
               </div>

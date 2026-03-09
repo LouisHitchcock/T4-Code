@@ -151,12 +151,10 @@ export const NodePtyAdapterLive = Layer.effect(
     return {
       spawn: Effect.fn(function* (input) {
         if (!nodePty) {
-          return yield* Effect.fail(
-            new PtySpawnError({
-              adapter: "node-pty",
-              message: NODE_PTY_UNAVAILABLE_MESSAGE,
-            }),
-          );
+          return yield* new PtySpawnError({
+            adapter: "node-pty",
+            message: NODE_PTY_UNAVAILABLE_MESSAGE,
+          });
         }
 
         yield* ensureNodePtySpawnHelperExecutableCached;
