@@ -3,6 +3,7 @@ import { DEFAULT_MODEL_BY_PROVIDER, MODEL_OPTIONS_BY_PROVIDER } from "@t3tools/c
 
 import {
   getDefaultModel,
+  getModelDisplayName,
   getDefaultReasoningEffort,
   getModelOptions,
   getReasoningEffortOptions,
@@ -65,6 +66,20 @@ describe("resolveModelSlug", () => {
     expect(getDefaultModel("kimi")).toBe(DEFAULT_MODEL_BY_PROVIDER.kimi);
     expect(getModelOptions("kimi")).toEqual(MODEL_OPTIONS_BY_PROVIDER.kimi);
     expect(resolveModelSlug("kimi-for-coding", "kimi")).toBe("kimi-for-coding");
+  });
+});
+
+describe("getModelDisplayName", () => {
+  it("returns built-in catalog names", () => {
+    expect(getModelDisplayName("gpt-5.4", "codex")).toBe("GPT-5.4");
+    expect(getModelDisplayName("kimi-for-coding", "kimi")).toBe("Kimi for Coding");
+  });
+
+  it("formats raw Kimi ACP ids into readable labels", () => {
+    expect(getModelDisplayName("kimi-code/kimi-for-coding,thinking", "kimi")).toBe(
+      "Kimi for Coding · Thinking",
+    );
+    expect(getModelDisplayName("kimi-k2-thinking", "kimi")).toBe("Kimi K2 Thinking");
   });
 });
 

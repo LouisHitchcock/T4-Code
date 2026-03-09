@@ -25,6 +25,7 @@ import {
 } from "@t3tools/contracts";
 import {
   getDefaultModel,
+  getModelDisplayName,
   getDefaultReasoningEffort,
   getReasoningEffortOptions,
   normalizeModelSlug,
@@ -6080,7 +6081,8 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const copilotUsageQuery = useQuery(serverCopilotUsageQueryOptions(isMenuOpen));
   const selectedProviderOptions = props.modelOptionsByProvider[props.provider];
   const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
+    selectedProviderOptions.find((option) => option.slug === props.model)?.name ??
+    getModelDisplayName(props.model, props.provider);
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.provider];
 
   return (

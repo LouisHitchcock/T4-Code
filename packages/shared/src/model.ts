@@ -21,6 +21,83 @@ export function getModelOptions(provider: ProviderKind = "codex") {
   return MODEL_OPTIONS_BY_PROVIDER[provider];
 }
 
+function humanizeModelQualifier(input: string): string {
+  return input
+    .trim()
+    .split(/[\s._/-]+/)
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function formatKimiModelDisplayName(model: string): string {
+  const trimmed = model.trim();
+  let suffix = trimmed;
+  for (const segment of trimmed.split("/")) {
+    if (segment.length > 0) {
+      suffix = segment;
+    }
+  }
+
+  const parts: string[] = [];
+  for (const segment of suffix.split(",")) {
+    const trimmedSegment = segment.trim();
+    if (trimmedSegment.length > 0) {
+      parts.push(trimmedSegment);
+    }
+  }
+
+  const [baseModel, ...qualifiers] = parts;
+
+  if (!baseModel) {
+    return trimmed;
+  }
+
+  const baseOption = MODEL_OPTIONS_BY_PROVIDER.kimi.find((option) => option.slug === baseModel);
+  const baseLabel = baseOption?.name ?? humanizeModelQualifier(baseModel);
+  if (qualifiers.length === 0) {
+    return baseLabel;
+  }
+
+  const qualifierLabel = qualifiers.map(humanizeModelQualifier).filter(Boolean).join(" · ");
+  return qualifierLabel.length > 0 ? `${baseLabel} · ${qualifierLabel}` : baseLabel;
+}
+
+export function getModelDisplayName(
+  model: string | null | undefined,
+  provider: ProviderKind = "codex",
+): string {
+  if (typeof model !== "string") {
+    return getDefaultModel(provider);
+  }
+
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return getDefaultModel(provider);
+  }
+
+  const direct = MODEL_OPTIONS_BY_PROVIDER[provider].find((option) => option.slug === trimmed);
+  if (direct) {
+    return direct.name;
+  }
+
+  const normalized = normalizeModelSlug(trimmed, provider);
+  if (normalized) {
+    const normalizedOption = MODEL_OPTIONS_BY_PROVIDER[provider].find(
+      (option) => option.slug === normalized,
+    );
+    if (normalizedOption) {
+      return normalizedOption.name;
+    }
+  }
+
+  if (provider === "kimi") {
+    return formatKimiModelDisplayName(trimmed);
+  }
+
+  return trimmed;
+}
+
 export function getDefaultModel(provider: ProviderKind = "codex"): ModelSlug {
   return DEFAULT_MODEL_BY_PROVIDER[provider];
 }

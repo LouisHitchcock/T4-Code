@@ -330,6 +330,32 @@ describe("deriveConfiguredModelOptions", () => {
       { slug: "kimi-k2-thinking", name: "Kimi K2 Thinking" },
     ]);
   });
+
+  it("formats raw Kimi current model ids when ACP omits display names", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "session-configured-kimi-raw",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "session.configured",
+        summary: "Session configured",
+        tone: "info",
+        payload: {
+          provider: "kimi",
+          config: {
+            currentModelId: "kimi-code/kimi-for-coding,thinking",
+            availableModels: [],
+          },
+        },
+      }),
+    ];
+
+    expect(deriveConfiguredModelOptions(activities, "kimi")).toEqual([
+      {
+        slug: "kimi-code/kimi-for-coding,thinking",
+        name: "Kimi for Coding · Thinking",
+      },
+    ]);
+  });
 });
 
 describe("deriveActivePlanState", () => {

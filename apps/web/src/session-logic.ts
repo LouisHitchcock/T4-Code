@@ -7,6 +7,7 @@ import {
   type UserInputQuestion,
   type TurnId,
 } from "@t3tools/contracts";
+import { getModelDisplayName } from "@t3tools/shared/model";
 
 import type { ChatMessage, ProposedPlan, SessionPhase, ThreadSession, TurnDiffSummary } from "./types";
 
@@ -366,7 +367,7 @@ export function deriveConfiguredModelOptionsFromActivityGroups(
         name:
           typeof candidate.name === "string" && candidate.name.trim().length > 0
             ? candidate.name.trim()
-            : slug,
+            : getModelDisplayName(slug, provider),
       });
     }
 
@@ -377,7 +378,7 @@ export function deriveConfiguredModelOptionsFromActivityGroups(
     if (currentModelId && !seen.has(currentModelId)) {
       options.unshift({
         slug: currentModelId,
-        name: currentModelId,
+        name: getModelDisplayName(currentModelId, provider),
       });
     }
 
