@@ -95,7 +95,7 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import {
-  resolveProviderStatusForChat,
+  resolveVisibleProviderStatusForChat,
 } from "../providerStatus";
 import { useStore } from "../store";
 import {
@@ -1491,12 +1491,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
   const activeProviderStatus = useMemo(
     () =>
-      resolveProviderStatusForChat({
+      resolveVisibleProviderStatusForChat({
         providerStatuses,
         selectedProvider,
         sessionProvider,
+        sessionStatus: activeThread?.session?.orchestrationStatus ?? null,
       }),
-    [providerStatuses, selectedProvider, sessionProvider],
+    [activeThread?.session?.orchestrationStatus, providerStatuses, selectedProvider, sessionProvider],
   );
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
