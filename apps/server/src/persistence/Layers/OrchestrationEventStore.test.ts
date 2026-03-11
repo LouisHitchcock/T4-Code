@@ -176,7 +176,7 @@ layer("OrchestrationEventStore", (it) => {
       assert.equal(replayed.length, 1);
       assert.equal(replayed[0]?.type, "thread.turn-start-requested");
       if (replayed[0]?.type === "thread.turn-start-requested") {
-        assert.equal(replayed[0].payload.provider, "codex");
+        assert.equal(replayed[0].payload.provider, "copilot");
       }
     }),
   );

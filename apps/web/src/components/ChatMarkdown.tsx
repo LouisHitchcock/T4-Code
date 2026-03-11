@@ -73,6 +73,9 @@ function extractFenceLanguage(className: string | undefined): string {
   const language = match?.[1]?.toLowerCase() ?? "text";
 
   switch (language) {
+    case "gitignore":
+      // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
+      return "ini";
     case "cpp":
     case "cxx":
     case "cc":
