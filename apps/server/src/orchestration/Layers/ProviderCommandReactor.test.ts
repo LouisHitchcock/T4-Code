@@ -527,6 +527,81 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("preserves token usage when rebinding a restarted provider session", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-token-usage-preserve-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-token-usage-preserve-1"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-token-usage"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          tokenUsage: {
+            provider: "codex",
+            kind: "thread",
+            observedAt: now,
+            model: "gpt-5-codex",
+            usage: {
+              totalTokens: 12_345,
+            },
+          },
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-runtime-mode-set-token-usage-preserve"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.session?.runtimeMode).toBe("full-access");
+    expect(thread?.session?.tokenUsage).toMatchObject({
+      provider: "codex",
+      kind: "thread",
+      usage: {
+        totalTokens: 12_345,
+      },
+    });
+  });
+
   it("does not stop the active session when restart fails before rebind", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -693,6 +768,89 @@ describe("ProviderCommandReactor", () => {
       model: "kimi-k2-thinking",
     });
     expect(harness.sendTurn.mock.calls[1]?.[0]).not.toHaveProperty("model");
+  });
+
+  it("clears legacy token usage when a provider/model switch restarts the session", async () => {
+    const harness = await createHarness({
+      capabilitiesByProvider: {
+        kimi: "restart-session",
+      },
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-token-usage-codex"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-token-usage-codex"),
+          role: "user",
+          text: "first codex turn",
+          attachments: [],
+        },
+        provider: "codex",
+        model: "gpt-5-codex",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-legacy-token-usage"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          tokenUsage: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            tokenUsage: {
+              totalTokens: 12_345,
+            },
+          },
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-token-usage-kimi"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-token-usage-kimi"),
+          role: "user",
+          text: "second kimi turn",
+          attachments: [],
+        },
+        provider: "kimi",
+        model: "kimi-for-coding",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.session?.providerName).toBe("kimi");
+    expect(thread?.session?.tokenUsage).toBeUndefined();
   });
 
   it("records provider turn-start failures instead of silently dropping them", async () => {

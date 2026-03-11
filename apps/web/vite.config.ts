@@ -6,6 +6,17 @@ import { version } from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const devUrlEnv = process.env.VITE_DEV_SERVER_URL?.trim();
+const devServerHost = (() => {
+  if (!devUrlEnv) {
+    return "127.0.0.1";
+  }
+  try {
+    return new URL(devUrlEnv).hostname;
+  } catch {
+    return "127.0.0.1";
+  }
+})();
 
 const buildSourcemap =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -36,6 +47,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
+    host: devServerHost,
     port,
     strictPort: true,
     hmr: {
@@ -43,7 +55,7 @@ export default defineConfig({
       // inside Electron's BrowserWindow. Vite 8 uses console.debug for
       // connection logs — enable "Verbose" in DevTools to see them.
       protocol: "ws",
-      host: "localhost",
+      host: devServerHost,
     },
   },
   build: {

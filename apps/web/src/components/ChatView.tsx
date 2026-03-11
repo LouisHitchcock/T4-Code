@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 import {
   getDefaultModel,
+  getModelContextWindowInfo,
   getModelDisplayName,
   getDefaultReasoningEffort,
   getReasoningEffortOptions,
@@ -58,6 +59,7 @@ import {
   serverQueryKeys,
 } from "~/lib/serverReactQuery";
 import { formatCopilotRequestCost } from "~/lib/copilotBilling";
+import { describeContextWindowState, formatCompactTokenCount } from "~/lib/contextWindow";
 import { buildComposerMcpServerItems, providerSupportsMcp } from "../mcpServers";
 
 import { isElectron } from "../env";
@@ -1032,7 +1034,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     markThreadVisited,
   ]);
 
-  const sessionProvider = activeThread?.session?.provider ?? null;
+  const sessionProvider = activeThread?.session?.provider ?? activeThread?.provider ?? null;
   const selectedProviderByThreadId = composerDraft.provider;
   const hasThreadStarted = Boolean(
     activeThread &&
@@ -1543,11 +1545,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
   const providerMcpStatuses = serverConfigQuery.data?.mcpServers ?? EMPTY_PROVIDER_MCP_STATUSES;
   const composerMcpProvider: ProviderKind = useMemo(() => {
-    const provider = activeThread?.session?.provider;
+    const provider = activeThread?.session?.provider ?? activeThread?.provider;
     return provider === "codex" || provider === "copilot" || provider === "kimi"
       ? provider
       : selectedProvider;
-  }, [activeThread?.session?.provider, selectedProvider]);
+  }, [activeThread?.provider, activeThread?.session?.provider, selectedProvider]);
   const composerMcpSupported = useMemo(
     () => providerSupportsMcp(providerMcpStatuses, composerMcpProvider),
     [composerMcpProvider, providerMcpStatuses],
@@ -4220,6 +4222,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     >
                       {/* Provider/model picker */}
                       <ProviderModelPicker
+                        activeThread={activeThread ?? null}
                         compact={isComposerFooterCompact}
                         provider={selectedProvider}
                         model={selectedModelForPickerWithCustomFallback}
@@ -4227,6 +4230,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         modelOptionsByProvider={modelOptionsByProvider}
                         serviceTierSetting={selectedServiceTierSetting}
                         onProviderModelChange={onProviderModelSelect}
+                      />
+
+                      <ComposerContextWindowStatus
+                        compact={isComposerFooterCompact}
+                        provider={selectedProvider}
+                        model={selectedModelForPickerWithCustomFallback}
+                        tokenUsage={activeThread?.session?.tokenUsage}
                       />
 
                       {isComposerFooterCompact ? (
@@ -6324,7 +6334,174 @@ function renderCopilotUsageSummary(usage: ServerCopilotUsage | null, isLoading: 
   );
 }
 
+function renderProviderContextWindowSummary(input: {
+  provider: ProviderKind;
+  model: string | null | undefined;
+  tokenUsage?: unknown;
+}) {
+  const state = describeContextWindowState({
+    provider: input.provider,
+    model: input.model,
+    tokenUsage: input.tokenUsage,
+  });
+
+  if (
+    state.totalTokens !== null &&
+    state.usedTokens !== null &&
+    state.totalLabel &&
+    state.usedLabel &&
+    state.remainingLabel
+  ) {
+    const usageTitle =
+      state.usageScope === "thread" ? "Latest thread snapshot" : "Last completed turn";
+    return (
+      <div className="space-y-1 px-2 py-2.5">
+        <div className="font-medium text-[11px] text-muted-foreground/85 uppercase tracking-[0.12em]">
+          Context window
+        </div>
+        <div className="text-sm font-medium">{usageTitle}</div>
+        <div className="text-muted-foreground/90 text-xs">{`${state.usedLabel} / ${state.totalLabel} used`}</div>
+        <div className="text-muted-foreground/90 text-xs">{`${state.remainingLabel} left`}</div>
+        {state.note ? (
+          <div className="text-muted-foreground/75 text-[11px] leading-relaxed">{state.note}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (state.totalTokens !== null && state.totalLabel) {
+    return (
+      <div className="space-y-1 px-2 py-2.5">
+        <div className="font-medium text-[11px] text-muted-foreground/85 uppercase tracking-[0.12em]">
+          Context window
+        </div>
+        <div className="text-sm font-medium">{`${state.totalLabel} documented total`}</div>
+        <div className="text-muted-foreground/90 text-xs">
+          Usage appears once the provider reports it.
+        </div>
+        {state.note ? (
+          <div className="text-muted-foreground/75 text-[11px] leading-relaxed">{state.note}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1 px-2 py-2.5">
+      <div className="font-medium text-[11px] text-muted-foreground/85 uppercase tracking-[0.12em]">
+        Context window
+      </div>
+      <div className="text-sm">Total context window unavailable</div>
+      <div className="text-muted-foreground/80 text-xs leading-relaxed">
+        {state.note ??
+          "This provider does not currently expose a separately documented total for this model."}
+      </div>
+    </div>
+  );
+}
+
+function formatContextUsagePercent(percentUsed: number): string {
+  if (!Number.isFinite(percentUsed) || percentUsed <= 0) {
+    return "0%";
+  }
+  if (percentUsed < 1) {
+    return "<1%";
+  }
+  return `${Math.round(percentUsed)}%`;
+}
+
+const ComposerContextWindowStatus = memo(function ComposerContextWindowStatus(props: {
+  provider: ProviderKind;
+  model: string | null | undefined;
+  tokenUsage?: unknown;
+  compact?: boolean;
+}) {
+  const state = describeContextWindowState({
+    provider: props.provider,
+    model: props.model,
+    tokenUsage: props.tokenUsage,
+  });
+
+  const hasUsedAndTotal =
+    state.totalTokens !== null &&
+    state.totalTokens > 0 &&
+    state.usedTokens !== null &&
+    state.totalLabel !== null &&
+    state.usedLabel !== null &&
+    state.remainingLabel !== null;
+  const totalTokens = hasUsedAndTotal ? state.totalTokens : null;
+  const usedTokens = hasUsedAndTotal ? state.usedTokens : null;
+  const percentUsed =
+    totalTokens !== null && usedTokens !== null
+      ? Math.max(0, Math.min(100, (usedTokens / totalTokens) * 100))
+      : null;
+  const progressWidth = percentUsed !== null && percentUsed > 0 ? Math.max(percentUsed, 2) : 0;
+  const primaryLabel = hasUsedAndTotal
+    ? `${state.usedLabel} / ${state.totalLabel} tokens`
+    : state.totalLabel
+      ? `${state.totalLabel} total`
+      : state.usedLabel
+        ? `${state.usedLabel} used`
+        : null;
+  const statusLabel = hasUsedAndTotal
+    ? state.usageScope === "thread"
+      ? "Latest thread snapshot"
+      : "Last completed turn"
+    : state.totalLabel
+      ? "Usage appears once the provider reports it."
+      : (state.note ?? "Context window unavailable.");
+  const secondaryLabel = hasUsedAndTotal ? `${state.remainingLabel} left` : statusLabel;
+
+  if (!primaryLabel) {
+    return null;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <div
+            aria-label="Context window status"
+            className={cn(
+              "flex shrink-0 flex-col gap-1 rounded-md border border-border/50 bg-muted/25 px-2 py-1.5",
+              props.compact ? "max-w-[10.5rem] min-w-[8.5rem]" : "max-w-[12.5rem] min-w-[10rem]",
+            )}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-xs font-medium">{primaryLabel}</span>
+              {percentUsed !== null ? (
+                <span className="shrink-0 text-[11px] text-muted-foreground/75">
+                  {formatContextUsagePercent(percentUsed)}
+                </span>
+              ) : null}
+            </div>
+            <div className="truncate text-[11px] text-muted-foreground/75">{secondaryLabel}</div>
+            <div className="h-1 overflow-hidden rounded-full bg-muted-foreground/15">
+              <div
+                className="h-full rounded-full bg-foreground/45 transition-[width]"
+                style={{ width: `${progressWidth}%` }}
+              />
+            </div>
+          </div>
+        }
+      />
+      <TooltipPopup side="top" className="max-w-72 whitespace-normal leading-relaxed">
+        <div className="space-y-1">
+          <div className="font-medium">Context window</div>
+          <div>{primaryLabel}</div>
+          {hasUsedAndTotal ? <div>{secondaryLabel}</div> : null}
+          <div className="text-muted-foreground/80 text-[11px]">{statusLabel}</div>
+          {state.note ? (
+            <div className="text-muted-foreground/80 text-[11px]">{state.note}</div>
+          ) : null}
+        </div>
+      </TooltipPopup>
+    </Tooltip>
+  );
+});
+
 const ProviderModelPicker = memo(function ProviderModelPicker(props: {
+  activeThread: Thread | null;
   provider: ProviderKind;
   model: ModelSlug;
   lockedProvider: ProviderKind | null;
@@ -6401,6 +6578,22 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   option.value === "copilot" && "w-80",
                 )}
               >
+                {option.value === props.provider ? (
+                  <>
+                    {renderProviderContextWindowSummary({
+                      provider: option.value,
+                      model:
+                        props.activeThread?.session?.provider === option.value
+                          ? (props.activeThread.model ?? props.model)
+                          : props.model,
+                      tokenUsage:
+                        props.activeThread?.session?.provider === option.value
+                          ? props.activeThread.session.tokenUsage
+                          : undefined,
+                    })}
+                    <MenuDivider />
+                  </>
+                ) : null}
                 {option.value === "copilot" ? (
                   <>
                     {renderCopilotUsageSummary(
@@ -6439,11 +6632,25 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                             <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
                           ) : null}
                           <span className="truncate">{modelOption.name}</span>
-                          {option.value === "copilot" ? (
-                            <span className="ms-auto shrink-0 text-muted-foreground/80 text-[11px]">
-                              {formatCopilotRequestCost(modelOption.slug) ?? "Unknown"}
-                            </span>
-                          ) : null}
+                          <span className="ms-auto shrink-0 text-muted-foreground/80 text-[11px]">
+                            {(() => {
+                              const contextInfo = getModelContextWindowInfo(
+                                modelOption.slug,
+                                option.value,
+                              );
+                              const contextLabel =
+                                contextInfo?.totalTokens !== undefined
+                                  ? formatCompactTokenCount(contextInfo.totalTokens)
+                                  : "Unknown";
+
+                              if (option.value !== "copilot") {
+                                return contextLabel;
+                              }
+
+                              const requestCost = formatCopilotRequestCost(modelOption.slug);
+                              return [contextLabel, requestCost].filter(Boolean).join(" · ");
+                            })()}
+                          </span>
                         </span>
                       </MenuRadioItem>
                     ))}

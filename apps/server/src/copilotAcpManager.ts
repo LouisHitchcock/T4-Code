@@ -525,6 +525,17 @@ export class CopilotAcpManager extends EventEmitter<CopilotAcpManagerEvents> {
         return;
       }
 
+      case "usage_update": {
+        this.emitRuntimeEvent({
+          ...base,
+          type: "thread.token-usage.updated",
+          payload: {
+            usage: params.update,
+          },
+        });
+        return;
+      }
+
       case "tool_call": {
         context.toolSnapshots.set(params.update.toolCallId, {
           kind: params.update.kind ?? null,

@@ -105,6 +105,55 @@ function runtimePayloadRecord(event: ProviderRuntimeEvent): Record<string, unkno
   return payload as Record<string, unknown>;
 }
 
+function normalizeRuntimeTokenUsage(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const hasDirectTokenCounts =
+    record.totalTokens !== undefined ||
+    record.total_tokens !== undefined ||
+    record.totalTokenCount !== undefined ||
+    record.total_token_count !== undefined ||
+    record.inputTokens !== undefined ||
+    record.input_tokens !== undefined ||
+    record.prompt_token_count !== undefined ||
+    record.outputTokens !== undefined ||
+    record.output_tokens !== undefined ||
+    record.candidates_token_count !== undefined;
+
+  if (hasDirectTokenCounts) {
+    return value;
+  }
+
+  return record.tokenUsage !== undefined ? record.tokenUsage : value;
+}
+
+function createSessionTokenUsageSnapshot(input: {
+  kind: "thread" | "turn";
+  event: ProviderRuntimeEvent;
+  model: string;
+  usage?: unknown;
+  modelUsage?: Readonly<Record<string, unknown>>;
+}) {
+  return {
+    provider: input.event.provider,
+    kind: input.kind,
+    observedAt: input.event.createdAt,
+    model: input.model,
+    ...(input.usage !== undefined ? { usage: normalizeRuntimeTokenUsage(input.usage) } : {}),
+    ...(input.modelUsage !== undefined ? { modelUsage: input.modelUsage } : {}),
+  };
+}
+
+function sessionTokenUsageField(existingTokenUsage: unknown, nextTokenUsage?: unknown) {
+  if (nextTokenUsage !== undefined) {
+    return { tokenUsage: nextTokenUsage };
+  }
+  return existingTokenUsage !== undefined ? { tokenUsage: existingTokenUsage } : {};
+}
+
 function normalizeRuntimeTurnState(
   value: string | undefined,
 ): "completed" | "failed" | "interrupted" | "cancelled" {
@@ -850,6 +899,28 @@ const make = Effect.gen(function* () {
         event.type === "turn.started" ||
         event.type === "turn.completed"
       ) {
+        const turnCompletedPayload =
+          event.type === "turn.completed" ? runtimePayloadRecord(event) : undefined;
+        const nextTokenUsage =
+          turnCompletedPayload &&
+          (turnCompletedPayload.usage !== undefined ||
+            turnCompletedPayload.modelUsage !== undefined)
+            ? createSessionTokenUsageSnapshot({
+                kind: "turn",
+                event,
+                model: thread.model,
+                ...(turnCompletedPayload.usage !== undefined
+                  ? { usage: turnCompletedPayload.usage }
+                  : {}),
+                ...(turnCompletedPayload.modelUsage !== undefined
+                  ? {
+                      modelUsage: turnCompletedPayload.modelUsage as Readonly<
+                        Record<string, unknown>
+                      >,
+                    }
+                  : {}),
+              })
+            : undefined;
         const nextActiveTurnId =
           event.type === "turn.started"
             ? (eventTurnId ?? null)
@@ -894,11 +965,36 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
               lastError,
+              ...sessionTokenUsageField(thread.session?.tokenUsage, nextTokenUsage),
               updatedAt: now,
             },
             createdAt: now,
           });
         }
+      }
+
+      if (event.type === "thread.token-usage.updated") {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.session.set",
+          commandId: providerCommandId(event, "thread-token-usage-session-set"),
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: thread.session?.status ?? "ready",
+            providerName: thread.session?.providerName ?? event.provider,
+            runtimeMode: thread.session?.runtimeMode ?? "full-access",
+            activeTurnId: thread.session?.activeTurnId ?? null,
+            lastError: thread.session?.lastError ?? null,
+            tokenUsage: createSessionTokenUsageSnapshot({
+              kind: "thread",
+              event,
+              model: thread.model,
+              usage: event.payload.usage,
+            }),
+            updatedAt: now,
+          },
+          createdAt: now,
+        });
       }
 
       const assistantDelta =
@@ -1063,6 +1159,7 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
+              ...sessionTokenUsageField(thread.session?.tokenUsage),
               updatedAt: now,
             },
             createdAt: now,

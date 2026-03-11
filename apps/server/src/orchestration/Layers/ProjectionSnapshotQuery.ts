@@ -60,7 +60,11 @@ const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
     sequence: Schema.NullOr(NonNegativeInt),
   }),
 );
-const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
+const ProjectionThreadSessionSnapshotDbRowSchema = ProjectionThreadSession.mapFields(
+  Struct.assign({
+    tokenUsage: Schema.NullOr(Schema.fromJsonString(Schema.Unknown)),
+  }),
+);
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
@@ -234,7 +238,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const listThreadSessionRows = SqlSchema.findAll({
     Request: Schema.Void,
-    Result: ProjectionThreadSessionDbRowSchema,
+    Result: ProjectionThreadSessionSnapshotDbRowSchema,
     execute: () =>
       sql`
         SELECT
@@ -246,6 +250,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           runtime_mode AS "runtimeMode",
           active_turn_id AS "activeTurnId",
           last_error AS "lastError",
+          token_usage_json AS "tokenUsage",
           updated_at AS "updatedAt"
         FROM projection_thread_sessions
         ORDER BY thread_id ASC
@@ -509,6 +514,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               runtimeMode: row.runtimeMode,
               activeTurnId: row.activeTurnId,
               lastError: row.lastError,
+              ...(row.tokenUsage !== null ? { tokenUsage: row.tokenUsage } : {}),
               updatedAt: row.updatedAt,
             });
           }

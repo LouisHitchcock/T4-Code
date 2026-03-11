@@ -255,6 +255,112 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("captures turn token-usage snapshots from completed turns", async () => {
+    const harness = await createHarness();
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-usage"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-usage"),
+      payload: {
+        state: "completed",
+        usage: {
+          inputTokens: 321,
+          outputTokens: 89,
+        },
+        modelUsage: {
+          inputTokens: 321,
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) => {
+      const tokenUsage = entry.session?.tokenUsage as
+        | { kind?: string; usage?: { inputTokens?: number } }
+        | undefined;
+      return (
+        entry.session?.status === "ready" &&
+        tokenUsage?.kind === "turn" &&
+        tokenUsage.usage?.inputTokens === 321
+      );
+    });
+
+    expect(thread.session?.tokenUsage).toMatchObject({
+      provider: "codex",
+      kind: "turn",
+      model: "gpt-5-codex",
+      usage: {
+        inputTokens: 321,
+        outputTokens: 89,
+      },
+      modelUsage: {
+        inputTokens: 321,
+      },
+    });
+  });
+
+  it("captures thread token-usage updates without clearing active session state", async () => {
+    const harness = await createHarness();
+    const startedAt = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-for-thread-usage"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: startedAt,
+      turnId: asTurnId("turn-thread-usage"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-thread-usage",
+    );
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-thread-usage"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      payload: {
+        usage: {
+          threadId: "thread-1",
+          turnId: "turn-thread-usage",
+          tokenUsage: {
+            totalTokens: 4096,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) => {
+      const tokenUsage = entry.session?.tokenUsage as
+        | { kind?: string; usage?: { totalTokens?: number } }
+        | undefined;
+      return (
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-thread-usage" &&
+        tokenUsage?.kind === "thread" &&
+        tokenUsage.usage?.totalTokens === 4096
+      );
+    });
+
+    expect(thread.session?.tokenUsage).toMatchObject({
+      provider: "codex",
+      kind: "thread",
+      model: "gpt-5-codex",
+      usage: {
+        totalTokens: 4096,
+      },
+    });
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();

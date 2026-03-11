@@ -13,6 +13,7 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const DEFAULT_LOOPBACK_HOST = "127.0.0.1";
 
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3", "dev"),
@@ -148,14 +149,20 @@ export function createDevRunnerEnv({
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedStateDir = yield* resolveStateDir(stateDir);
+    const resolvedHost =
+      host && host !== "0.0.0.0" && host !== "::" && host !== "::0" ? host : DEFAULT_LOOPBACK_HOST;
+    const urlHost =
+      resolvedHost.includes(":") && !resolvedHost.startsWith("[")
+        ? `[${resolvedHost}]`
+        : resolvedHost;
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
       T3CODE_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
-      VITE_WS_URL: `ws://localhost:${serverPort}`,
-      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
+      VITE_WS_URL: `ws://${urlHost}:${serverPort}`,
+      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://${urlHost}:${webPort}`,
       T3CODE_STATE_DIR: resolvedStateDir,
     };
 

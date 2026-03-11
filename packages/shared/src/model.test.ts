@@ -3,6 +3,7 @@ import { DEFAULT_MODEL_BY_PROVIDER, MODEL_OPTIONS_BY_PROVIDER } from "@t3tools/c
 
 import {
   getDefaultModel,
+  getModelContextWindowInfo,
   getModelDisplayName,
   getDefaultReasoningEffort,
   getModelOptions,
@@ -13,6 +14,7 @@ import {
 
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
+    expect(normalizeModelSlug("gpt-5-codex")).toBe("gpt-5-codex");
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
   });
@@ -72,6 +74,7 @@ describe("resolveModelSlug", () => {
 describe("getModelDisplayName", () => {
   it("returns built-in catalog names", () => {
     expect(getModelDisplayName("gpt-5.4", "codex")).toBe("GPT-5.4");
+    expect(getModelDisplayName("gpt-5-codex", "codex")).toBe("GPT-5 Codex");
     expect(getModelDisplayName("kimi-for-coding", "kimi")).toBe("Kimi for Coding");
   });
 
@@ -80,6 +83,25 @@ describe("getModelDisplayName", () => {
       "Kimi for Coding · Thinking",
     );
     expect(getModelDisplayName("kimi-k2-thinking", "kimi")).toBe("Kimi K2 Thinking");
+  });
+});
+
+describe("getModelContextWindowInfo", () => {
+  it("returns provider-specific context-window metadata for documented models", () => {
+    expect(getModelContextWindowInfo("gpt-5-codex", "codex")?.totalTokens).toBe(400_000);
+    expect(getModelContextWindowInfo("gpt-5.4", "codex")?.totalTokens).toBe(1_000_000);
+    expect(getModelContextWindowInfo("gpt-5.4", "copilot")?.totalTokens).toBe(1_000_000);
+    expect(getModelContextWindowInfo("kimi-for-coding", "kimi")?.totalTokens).toBe(262_144);
+  });
+
+  it("preserves unknown totals when only a note is documented", () => {
+    const info = getModelContextWindowInfo("claude-opus-4.6-fast", "copilot");
+    expect(info?.totalTokens).toBeUndefined();
+    expect(info?.note).toContain("does not publish a separate context-window limit");
+  });
+
+  it("returns null for missing metadata", () => {
+    expect(getModelContextWindowInfo("custom/internal-model", "copilot")).toBeNull();
   });
 });
 

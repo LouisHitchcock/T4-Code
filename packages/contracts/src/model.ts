@@ -29,9 +29,25 @@ type ModelOption = {
   readonly name: string;
 };
 
+export type ModelContextWindowSource = "provider-doc" | "vendor-doc" | "provider-config";
+
+export type ModelContextWindowInfo = {
+  readonly totalTokens?: number;
+  readonly source: ModelContextWindowSource;
+  readonly note?: string;
+};
+
+const COPILOT_VENDOR_LIMIT_NOTE =
+  "GitHub Copilot does not publish a separate context-window limit for this model; the total below comes from the model vendor docs.";
+const COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE =
+  "Anthropic documents a 200K standard window and 1M beta access for some API setups. GitHub Copilot does not publish whether that extended path is enabled.";
+const COPILOT_GEMINI_PREVIEW_NOTE =
+  "Google documented Gemini 3 Pro at a 1M input window before deprecating the preview model. GitHub Copilot does not publish a separate limit for its Gemini 3 Pro offering.";
+
 export const MODEL_OPTIONS_BY_PROVIDER = {
   codex: [
     { slug: "gpt-5.4", name: "GPT-5.4" },
+    { slug: "gpt-5-codex", name: "GPT-5 Codex" },
     { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
     { slug: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark" },
     { slug: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
@@ -69,6 +85,135 @@ export const DEFAULT_MODEL_BY_PROVIDER = {
   copilot: "claude-sonnet-4.5",
   kimi: "kimi-for-coding",
 } as const satisfies Record<ProviderKind, ModelSlug>;
+
+export const MODEL_CONTEXT_WINDOW_INFO_BY_PROVIDER = {
+  codex: {
+    "gpt-5.4": {
+      totalTokens: 1_000_000,
+      source: "provider-doc",
+      note: "OpenAI documents GPT-5.4 with a 1M-token context window.",
+    },
+    "gpt-5-codex": {
+      totalTokens: 400_000,
+      source: "provider-doc",
+    },
+    "gpt-5.3-codex": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+    },
+    "gpt-5.3-codex-spark": {
+      totalTokens: 128_000,
+      source: "provider-doc",
+      note: "Codex documents GPT-5.3 Codex Spark as a 128K text-only research preview.",
+    },
+    "gpt-5.2-codex": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+    },
+    "gpt-5.2": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+    },
+  },
+  copilot: {
+    "claude-sonnet-4.6": {
+      totalTokens: 200_000,
+      source: "vendor-doc",
+      note: COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE,
+    },
+    "claude-sonnet-4.5": {
+      totalTokens: 200_000,
+      source: "vendor-doc",
+      note: COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE,
+    },
+    "claude-haiku-4.5": {
+      totalTokens: 200_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "claude-opus-4.6": {
+      totalTokens: 200_000,
+      source: "vendor-doc",
+      note: COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE,
+    },
+    "claude-opus-4.6-fast": {
+      source: "vendor-doc",
+      note: "GitHub exposes Claude Opus 4.6 fast mode as a preview, but Anthropic does not publish a separate context-window limit for that mode.",
+    },
+    "claude-opus-4.5": {
+      totalTokens: 200_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "claude-sonnet-4": {
+      totalTokens: 200_000,
+      source: "vendor-doc",
+      note: COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE,
+    },
+    "gemini-3-pro-preview": {
+      totalTokens: 1_000_000,
+      source: "vendor-doc",
+      note: COPILOT_GEMINI_PREVIEW_NOTE,
+    },
+    "gpt-5.4": {
+      totalTokens: 1_000_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.3-codex": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.2-codex": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.2": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.1-codex-max": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.1-codex": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.1": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5.1-codex-mini": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-5-mini": {
+      totalTokens: 400_000,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+    "gpt-4.1": {
+      totalTokens: 1_047_576,
+      source: "vendor-doc",
+      note: COPILOT_VENDOR_LIMIT_NOTE,
+    },
+  },
+  kimi: {
+    "kimi-for-coding": {
+      totalTokens: 262_144,
+      source: "provider-config",
+      note: "The Kimi integration configures a default max_context_size of 262,144 tokens.",
+    },
+  },
+} as const satisfies Record<ProviderKind, Record<string, ModelContextWindowInfo>>;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
   codex: {

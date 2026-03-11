@@ -88,6 +88,7 @@ export interface Thread {
   codexThreadId: string | null;
   projectId: ProjectId;
   title: string;
+  provider?: ProviderKind;
   model: string;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -111,5 +112,6 @@ export interface ThreadSession {
   createdAt: string;
   updatedAt: string;
   lastError?: string;
+  tokenUsage?: unknown;
   orchestrationStatus: OrchestrationSessionStatus;
 }

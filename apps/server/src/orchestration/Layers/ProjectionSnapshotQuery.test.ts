@@ -134,6 +134,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtime_mode,
           active_turn_id,
           last_error,
+          token_usage_json,
           updated_at
         )
         VALUES (
@@ -145,6 +146,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'approval-required',
           'turn-1',
           NULL,
+          '{"provider":"codex","kind":"thread","model":"gpt-5-codex","usage":{"modelContextWindow":400000,"last":{"totalTokens":121900}}}',
           '2026-02-24T00:00:07.000Z'
         )
       `;
@@ -283,6 +285,17 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             runtimeMode: "approval-required",
             activeTurnId: asTurnId("turn-1"),
             lastError: null,
+            tokenUsage: {
+              provider: "codex",
+              kind: "thread",
+              model: "gpt-5-codex",
+              usage: {
+                modelContextWindow: 400_000,
+                last: {
+                  totalTokens: 121_900,
+                },
+              },
+            },
             updatedAt: "2026-02-24T00:00:07.000Z",
           },
         },

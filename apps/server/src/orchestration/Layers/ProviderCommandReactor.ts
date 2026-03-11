@@ -185,18 +185,32 @@ const make = Effect.gen(function* () {
       createdAt: input.createdAt,
     });
 
-  const setThreadSession = (input: {
+  const setThreadSession = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly session: OrchestrationSession;
     readonly createdAt: string;
-  }) =>
-    orchestrationEngine.dispatch({
+    readonly preserveExistingTokenUsage?: boolean;
+  }) {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const existingThread = readModel.threads.find((entry) => entry.id === input.threadId);
+    const existingTokenUsage = existingThread?.session?.tokenUsage;
+    const shouldPreserveExistingTokenUsage = input.preserveExistingTokenUsage ?? true;
+
+    return yield* orchestrationEngine.dispatch({
       type: "thread.session.set",
       commandId: serverCommandId("provider-session-set"),
       threadId: input.threadId,
-      session: input.session,
+      session: {
+        ...input.session,
+        ...(input.session.tokenUsage !== undefined
+          ? { tokenUsage: input.session.tokenUsage }
+          : shouldPreserveExistingTokenUsage && existingTokenUsage !== undefined
+            ? { tokenUsage: existingTokenUsage }
+            : {}),
+      },
       createdAt: input.createdAt,
     });
+  });
 
   const setProviderFailureSession = (input: {
     readonly threadId: ThreadId;
@@ -280,7 +294,12 @@ const make = Effect.gen(function* () {
         runtimeMode: desiredRuntimeMode,
       });
 
-    const bindSessionToThread = (session: ProviderSession) =>
+    const bindSessionToThread = (
+      session: ProviderSession,
+      options?: {
+        readonly preserveExistingTokenUsage?: boolean;
+      },
+    ) =>
       setThreadSession({
         threadId,
         session: {
@@ -294,6 +313,9 @@ const make = Effect.gen(function* () {
           updatedAt: session.updatedAt,
         },
         createdAt,
+        ...(options?.preserveExistingTokenUsage !== undefined
+          ? { preserveExistingTokenUsage: options.preserveExistingTokenUsage }
+          : {}),
       });
 
     const existingSessionThreadId =
@@ -342,7 +364,9 @@ const make = Effect.gen(function* () {
         provider: restartedSession.provider,
         runtimeMode: restartedSession.runtimeMode,
       });
-      yield* bindSessionToThread(restartedSession);
+      yield* bindSessionToThread(restartedSession, {
+        preserveExistingTokenUsage: !providerChanged && !shouldRestartForModelChange,
+      });
       return restartedSession.threadId;
     }
 

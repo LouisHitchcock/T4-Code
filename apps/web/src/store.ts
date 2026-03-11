@@ -231,15 +231,23 @@ function resolveThreadModelForSync(input: {
   readonly model: string;
   readonly provider: ProviderKind;
   readonly sessionProviderName: string | null;
+  readonly preserveUnknownCustomModel?: boolean;
 }): string {
   const normalized = normalizeModelSlug(input.model, input.provider);
   if (!normalized) {
     return DEFAULT_MODEL_BY_PROVIDER[input.provider];
   }
 
-  return input.sessionProviderName === input.provider
+  if (input.sessionProviderName === input.provider) {
+    return normalized;
+  }
+
+  const resolved = resolveModelSlugForProvider(input.provider, normalized);
+  return input.preserveUnknownCustomModel &&
+    resolved === DEFAULT_MODEL_BY_PROVIDER[input.provider] &&
+    normalized !== resolved
     ? normalized
-    : resolveModelSlugForProvider(input.provider, normalized);
+    : resolved;
 }
 
 function resolveWsHttpOrigin(): string {
@@ -286,18 +294,26 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     .filter((thread) => thread.deletedAt === null)
     .map((thread) => {
       const existing = existingThreadById.get(thread.id);
+      const inferredProvider = inferProviderForThreadModel({
+        model: thread.model,
+        sessionProviderName: thread.session?.providerName ?? null,
+      });
+      const provider =
+        thread.session?.providerName !== null && thread.session?.providerName !== undefined
+          ? toLegacyProvider(thread.session.providerName)
+          : (existing?.provider ?? inferredProvider);
       return {
         id: thread.id,
         codexThreadId: null,
         projectId: thread.projectId,
         title: thread.title,
+        provider,
         model: resolveThreadModelForSync({
-          provider: inferProviderForThreadModel({
-            model: thread.model,
-            sessionProviderName: thread.session?.providerName ?? null,
-          }),
+          provider,
           model: thread.model,
           sessionProviderName: thread.session?.providerName ?? null,
+          preserveUnknownCustomModel:
+            existing?.provider === provider && (provider === "copilot" || provider === "kimi"),
         }),
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
@@ -310,6 +326,9 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
               createdAt: thread.session.updatedAt,
               updatedAt: thread.session.updatedAt,
               ...(thread.session.lastError ? { lastError: thread.session.lastError } : {}),
+              ...(thread.session.tokenUsage !== undefined
+                ? { tokenUsage: thread.session.tokenUsage }
+                : {}),
             }
           : null,
         messages: thread.messages.map((message) => {

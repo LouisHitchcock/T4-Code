@@ -16,6 +16,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     codexThreadId: null,
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    provider: "codex",
     model: "gpt-5-codex",
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
@@ -224,6 +225,46 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, readModel);
 
     expect(next.threads[0]?.model).toBe("kimi-k2-thinking");
+  });
+
+  it("preserves the existing thread provider when the live session disappears", () => {
+    const initialState = makeState(
+      makeThread({
+        provider: "copilot",
+        model: "gpt-5.4",
+      }),
+    );
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        model: "gpt-5.4",
+        session: null,
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.provider).toBe("copilot");
+    expect(next.threads[0]?.model).toBe("gpt-5.4");
+  });
+
+  it("preserves supported custom-provider models after the live session disappears", () => {
+    const initialState = makeState(
+      makeThread({
+        provider: "copilot",
+        model: "custom/internal-model",
+      }),
+    );
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        model: "custom/internal-model",
+        session: null,
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.provider).toBe("copilot");
+    expect(next.threads[0]?.model).toBe("custom/internal-model");
   });
 
   it("preserves the current project order when syncing incoming read model updates", () => {

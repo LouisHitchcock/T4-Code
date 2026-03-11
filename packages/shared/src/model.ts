@@ -1,10 +1,12 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_REASONING_EFFORT_BY_PROVIDER,
+  MODEL_CONTEXT_WINDOW_INFO_BY_PROVIDER,
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   REASONING_EFFORT_OPTIONS_BY_PROVIDER,
   type CodexReasoningEffort,
+  type ModelContextWindowInfo,
   type ModelSlug,
   type ProviderKind,
 } from "@t3tools/contracts";
@@ -96,6 +98,23 @@ export function getModelDisplayName(
   }
 
   return trimmed;
+}
+
+export function getModelContextWindowInfo(
+  model: string | null | undefined,
+  provider: ProviderKind = "codex",
+): ModelContextWindowInfo | null {
+  const normalized = normalizeModelSlug(model, provider);
+  if (!normalized) {
+    return null;
+  }
+
+  const infoByProvider = MODEL_CONTEXT_WINDOW_INFO_BY_PROVIDER[provider] as Record<
+    string,
+    ModelContextWindowInfo
+  >;
+  const info = infoByProvider[normalized];
+  return info ?? null;
 }
 
 export function getDefaultModel(provider: ProviderKind = "codex"): ModelSlug {
