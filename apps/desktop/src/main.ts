@@ -13,10 +13,12 @@ import {
   nativeImage,
   nativeTheme,
   protocol,
+  safeStorage,
   shell,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import type {
+  DesktopSecretKey,
   DesktopTheme,
   DesktopUpdateActionResult,
   DesktopUpdateState,
@@ -37,6 +39,8 @@ import {
   resolveAutoUpdaterTrack,
   shouldBroadcastDownloadProgress,
 } from "./updateState";
+import { getLegacyUserDataDirNames, resolveDesktopUserDataPath } from "./userDataPath";
+import { normalizeDesktopSecretValue, shouldPersistDesktopSecrets } from "./secretStorage";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -58,6 +62,8 @@ const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+const SECRET_GET_CHANNEL = "desktop:secret-get";
+const SECRET_SET_CHANNEL = "desktop:secret-set";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const BACKEND_WS_URL_UPDATED_CHANNEL = "desktop:backend-ws-url-updated";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
@@ -76,10 +82,11 @@ const appReleaseBranding = resolveAppReleaseBranding({
 const APP_DISPLAY_NAME = appReleaseBranding.displayName;
 const APP_USER_MODEL_ID = "com.t3tools.t3code";
 const USER_DATA_DIR_NAME = appReleaseBranding.userDataDirName;
-const LEGACY_USER_DATA_DIR_NAME = APP_DISPLAY_NAME;
+const LEGACY_USER_DATA_DIR_NAMES = getLegacyUserDataDirNames(APP_DISPLAY_NAME);
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
+const SECRET_SETTINGS_PATH = Path.join(STATE_DIR, "secret-settings.json");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
@@ -95,6 +102,8 @@ let backendPort = 0;
 let backendAuthToken = "";
 let backendWsUrl = "";
 let backendStartupPromise: Promise<void> | null = null;
+const sessionSecretSettings = new Map<DesktopSecretKey, string>();
+let hasLoggedInsecureSecretStorage = false;
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -171,6 +180,129 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   }
 
   return null;
+}
+
+function getSafeDesktopSecretKey(rawKey: unknown): DesktopSecretKey | null {
+  return rawKey === "kimiApiKey" ? rawKey : null;
+}
+
+function readStoredDesktopSecrets(): Partial<Record<DesktopSecretKey, { encrypted: string }>> {
+  if (!FS.existsSync(SECRET_SETTINGS_PATH)) {
+    return {};
+  }
+
+  try {
+    const raw = FS.readFileSync(SECRET_SETTINGS_PATH, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, { encrypted?: unknown }>;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    const result: Partial<Record<DesktopSecretKey, { encrypted: string }>> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (key !== "kimiApiKey") {
+        continue;
+      }
+      if (!value || typeof value !== "object" || typeof value.encrypted !== "string") {
+        continue;
+      }
+      result[key] = { encrypted: value.encrypted };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredDesktopSecrets(
+  value: Partial<Record<DesktopSecretKey, { encrypted: string }>>,
+): void {
+  if (Object.keys(value).length === 0) {
+    try {
+      FS.rmSync(SECRET_SETTINGS_PATH, { force: true });
+    } catch {
+      // Ignore cleanup failures.
+    }
+    return;
+  }
+
+  FS.mkdirSync(Path.dirname(SECRET_SETTINGS_PATH), { recursive: true });
+  FS.writeFileSync(SECRET_SETTINGS_PATH, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function shouldPersistDesktopSecretsSecurely(): boolean {
+  return shouldPersistDesktopSecrets({
+    platform: process.platform,
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    selectedStorageBackend:
+      process.platform === "linux" && typeof safeStorage.getSelectedStorageBackend === "function"
+        ? safeStorage.getSelectedStorageBackend()
+        : null,
+  });
+}
+
+function readDesktopSecret(key: DesktopSecretKey): string | null {
+  const sessionValue = sessionSecretSettings.get(key);
+  if (sessionValue !== undefined) {
+    return sessionValue;
+  }
+
+  const storedValue = readStoredDesktopSecrets()[key];
+  if (!storedValue || !safeStorage.isEncryptionAvailable()) {
+    return null;
+  }
+
+  try {
+    const decryptedValue = normalizeDesktopSecretValue(
+      safeStorage.decryptString(Buffer.from(storedValue.encrypted, "base64")),
+    );
+    if (decryptedValue !== null) {
+      sessionSecretSettings.set(key, decryptedValue);
+    }
+    return decryptedValue;
+  } catch (error) {
+    console.warn(`[desktop] Failed to read stored secret '${key}'`, error);
+    return null;
+  }
+}
+
+function writeDesktopSecret(key: DesktopSecretKey, rawValue: unknown): void {
+  const value = normalizeDesktopSecretValue(rawValue);
+  const storedSecrets = readStoredDesktopSecrets();
+
+  if (value === null) {
+    sessionSecretSettings.delete(key);
+    if (storedSecrets[key]) {
+      delete storedSecrets[key];
+      writeStoredDesktopSecrets(storedSecrets);
+    }
+    return;
+  }
+
+  sessionSecretSettings.set(key, value);
+
+  if (!shouldPersistDesktopSecretsSecurely()) {
+    if (!hasLoggedInsecureSecretStorage) {
+      hasLoggedInsecureSecretStorage = true;
+      console.warn(
+        "[desktop] secure secret storage unavailable; keeping secrets in memory for this app session only",
+      );
+    }
+    if (storedSecrets[key]) {
+      delete storedSecrets[key];
+      writeStoredDesktopSecrets(storedSecrets);
+    }
+    return;
+  }
+
+  try {
+    storedSecrets[key] = {
+      encrypted: safeStorage.encryptString(value).toString("base64"),
+    };
+    writeStoredDesktopSecrets(storedSecrets);
+  } catch (error) {
+    console.error(`[desktop] Failed to persist secret '${key}'`, error);
+  }
 }
 
 function writeDesktopStreamChunk(
@@ -764,12 +896,12 @@ function resolveWindowIcon(): Electron.NativeImage | null {
  * Resolve the Electron userData directory path.
  *
  * Electron derives the default userData path from `productName` in
- * package.json, which currently produces directories with spaces and
+ * package.json, which historically produced directories with spaces and
  * parentheses (e.g. `~/.config/T3 Code (Alpha)` on Linux). This is
  * unfriendly for shell usage and violates Linux naming conventions.
  *
  * We override it to a clean lowercase name (`t3code`). If the legacy
- * directory already exists we keep using it so existing users don't
+ * directory already exists we keep using it so existing users do not
  * lose their Chromium profile data (localStorage, cookies, sessions).
  */
 function resolveUserDataPath(): string {
@@ -780,12 +912,12 @@ function resolveUserDataPath(): string {
         ? Path.join(OS.homedir(), "Library", "Application Support")
         : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
 
-  const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
-  if (FS.existsSync(legacyPath)) {
-    return legacyPath;
-  }
-
-  return Path.join(appDataBase, USER_DATA_DIR_NAME);
+  return resolveDesktopUserDataPath({
+    appDataBase,
+    userDataDirName: USER_DATA_DIR_NAME,
+    legacyDirNames: LEGACY_USER_DATA_DIR_NAMES,
+    pathExists: FS.existsSync,
+  });
 }
 
 function configureAppIdentity(): void {
@@ -1358,6 +1490,22 @@ function registerIpcHandlers(): void {
     } catch {
       return false;
     }
+  });
+
+  ipcMain.removeHandler(SECRET_GET_CHANNEL);
+  ipcMain.handle(SECRET_GET_CHANNEL, async (_event, rawKey: unknown) => {
+    const key = getSafeDesktopSecretKey(rawKey);
+    return key ? readDesktopSecret(key) : null;
+  });
+
+  ipcMain.removeHandler(SECRET_SET_CHANNEL);
+  ipcMain.handle(SECRET_SET_CHANNEL, async (_event, rawKey: unknown, rawValue: unknown) => {
+    const key = getSafeDesktopSecretKey(rawKey);
+    if (!key) {
+      return;
+    }
+
+    writeDesktopSecret(key, rawValue);
   });
 
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);

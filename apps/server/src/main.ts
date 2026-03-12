@@ -10,6 +10,7 @@ import { Config, Data, Effect, FileSystem, Layer, Option, Path, Schema, ServiceM
 import { Command, Flag } from "effect/unstable/cli";
 import { formatDesktopBackendReadyLine } from "@t3tools/shared/desktopBackend";
 import { NetService } from "@t3tools/shared/Net";
+import { withWsAuthToken } from "@t3tools/shared/wsAuth";
 import {
   DEFAULT_PORT,
   resolveStaticDir,
@@ -292,7 +293,7 @@ const makeServerProgram = (input: CliInput) =>
     });
 
     if (!config.noBrowser) {
-      const target = config.devUrl?.toString() ?? bindUrl;
+      const target = withWsAuthToken(config.devUrl?.toString() ?? bindUrl, config.authToken);
       yield* openDeps.openBrowser(target).pipe(
         Effect.catch(() =>
           Effect.logInfo("browser auto-open unavailable", {

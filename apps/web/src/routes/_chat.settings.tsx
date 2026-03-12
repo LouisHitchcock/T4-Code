@@ -582,8 +582,11 @@ function SettingsRouteView() {
                     spellCheck={false}
                   />
                   <span className="text-xs text-muted-foreground">
-                    Generate this from the Kimi Code Console. T3 Code stores it locally on this
-                    device and injects it into new Kimi CLI sessions.
+                    Generate this from the Kimi Code Console.{" "}
+                    {isElectron
+                      ? "T3 Code keeps it in the desktop session and persists it in your OS credential store when secure storage is available."
+                      : "T3 Code keeps it only in memory for the current browser session."}{" "}
+                    It is only used when starting new Kimi CLI sessions.
                   </span>
                 </label>
 

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getAppSettingsSnapshot,
   getAppModelOptions,
   getSlashModelOptions,
   normalizeCustomModelSlugs,
   resolveAppModelSelection,
+  sanitizePersistedAppSettingsForStorage,
   supportsCustomModels,
 } from "./appSettings";
 
@@ -138,5 +140,17 @@ describe("supportsCustomModels", () => {
     expect(supportsCustomModels("codex")).toBe(false);
     expect(supportsCustomModels("copilot")).toBe(true);
     expect(supportsCustomModels("kimi")).toBe(true);
+  });
+});
+
+describe("sanitizePersistedAppSettingsForStorage", () => {
+  it("removes the Kimi API key before writing settings to storage", () => {
+    const sanitized = sanitizePersistedAppSettingsForStorage({
+      ...getAppSettingsSnapshot(),
+      kimiApiKey: "sk-kimi-secret",
+    });
+
+    expect(sanitized.kimiApiKey).toBe("");
+    expect(sanitized.kimiBinaryPath).toBe(getAppSettingsSnapshot().kimiBinaryPath);
   });
 });

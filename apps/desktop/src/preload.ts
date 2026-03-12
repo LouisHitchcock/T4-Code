@@ -6,6 +6,8 @@ const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+const SECRET_GET_CHANNEL = "desktop:secret-get";
+const SECRET_SET_CHANNEL = "desktop:secret-set";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const BACKEND_WS_URL_UPDATED_CHANNEL = "desktop:backend-ws-url-updated";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
@@ -20,6 +22,8 @@ ipcRenderer.on(BACKEND_WS_URL_UPDATED_CHANNEL, (_event, nextUrl: unknown) => {
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => wsUrl,
+  getSecret: (key) => ipcRenderer.invoke(SECRET_GET_CHANNEL, key),
+  setSecret: (key, value) => ipcRenderer.invoke(SECRET_SET_CHANNEL, key, value),
   pickFolder: () => ipcRenderer.invoke(PICK_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),

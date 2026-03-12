@@ -32,6 +32,10 @@
       "types": "./src/appRelease.ts",
       "import": "./src/appRelease.ts"
     },
+    "./wsAuth": {
+      "types": "./src/wsAuth.ts",
+      "import": "./src/wsAuth.ts"
+    },
     "./DrainableWorker": {
       "types": "./src/DrainableWorker.ts",
       "import": "./src/DrainableWorker.ts"

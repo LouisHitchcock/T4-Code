@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
+import { withWsAuthToken } from "@t3tools/shared/wsAuth";
 import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
@@ -161,7 +162,7 @@ export function createDevRunnerEnv({
       T3CODE_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
-      VITE_WS_URL: `ws://${urlHost}:${serverPort}`,
+      VITE_WS_URL: withWsAuthToken(`ws://${urlHost}:${serverPort}`, authToken),
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://${urlHost}:${webPort}`,
       T3CODE_STATE_DIR: resolvedStateDir,
     };

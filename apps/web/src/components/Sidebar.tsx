@@ -578,16 +578,48 @@ export default function Sidebar() {
         ? formatWorktreePathForDisplay(orphanedWorktreePath)
         : null;
       const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== undefined;
-      const shouldDeleteWorktree =
-        canDeleteWorktree &&
-        (await api.dialogs.confirm(
-          [
-            "This thread is the only one linked to this worktree:",
-            displayWorktreePath ?? orphanedWorktreePath,
-            "",
-            "Delete the worktree too?",
-          ].join("\n"),
-        ));
+      let shouldDeleteWorktree = false;
+      let worktreeRemovalForce = false;
+
+      if (canDeleteWorktree && orphanedWorktreePath && threadProject) {
+        try {
+          const worktreeStatus = await queryClient.fetchQuery({
+            ...gitStatusQueryOptions(orphanedWorktreePath),
+            staleTime: 0,
+          });
+          const hasWorkingTreeChanges = worktreeStatus.hasWorkingTreeChanges;
+
+          shouldDeleteWorktree = await api.dialogs.confirm(
+            hasWorkingTreeChanges
+              ? [
+                  "This thread is the only one linked to this worktree:",
+                  displayWorktreePath ?? orphanedWorktreePath,
+                  "",
+                  "This worktree has uncommitted changes.",
+                  "Delete it too and permanently discard those changes?",
+                ].join("\n")
+              : [
+                  "This thread is the only one linked to this worktree:",
+                  displayWorktreePath ?? orphanedWorktreePath,
+                  "",
+                  "Delete the worktree too?",
+                ].join("\n"),
+          );
+          worktreeRemovalForce = hasWorkingTreeChanges;
+        } catch (error) {
+          console.warn("Skipping orphaned worktree removal after thread deletion", {
+            threadId,
+            projectCwd: threadProject.cwd,
+            worktreePath: orphanedWorktreePath,
+            error,
+          });
+          toastManager.add({
+            type: "info",
+            title: "Keeping orphaned worktree",
+            description: `T3 Code could not verify whether ${displayWorktreePath ?? orphanedWorktreePath} has uncommitted changes, so the worktree will be kept for safety.`,
+          });
+        }
+      }
 
       if (thread.session && thread.session.status !== "closed") {
         await api.orchestration
@@ -638,7 +670,7 @@ export default function Sidebar() {
         await removeWorktreeMutation.mutateAsync({
           cwd: threadProject.cwd,
           path: orphanedWorktreePath,
-          force: true,
+          force: worktreeRemovalForce,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error removing worktree.";
@@ -661,6 +693,7 @@ export default function Sidebar() {
       clearTerminalState,
       navigate,
       projects,
+      queryClient,
       removeWorktreeMutation,
       routeThreadId,
       threads,

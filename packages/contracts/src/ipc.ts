@@ -70,6 +70,7 @@ export type DesktopUpdateStatus =
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
+export type DesktopSecretKey = "kimiApiKey";
 
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
@@ -101,6 +102,8 @@ export interface DesktopUpdateActionResult {
 
 export interface DesktopBridge {
   getWsUrl: () => string | null;
+  getSecret: (key: DesktopSecretKey) => Promise<string | null>;
+  setSecret: (key: DesktopSecretKey, value: string | null) => Promise<void>;
   pickFolder: () => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;

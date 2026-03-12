@@ -7,6 +7,7 @@ import {
   WsResponse as WsResponseSchema,
 } from "@t3tools/contracts";
 import { decodeUnknownJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { getWsAuthToken, withoutWsAuthToken, withWsAuthToken } from "@t3tools/shared/wsAuth";
 import { Exit, Result, Schema } from "effect";
 
 type PushListener<C extends WsPushChannel> = (message: WsPushMessage<C>) => void;
@@ -34,23 +35,85 @@ const REQUEST_TIMEOUT_MS = 60_000;
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
 const decodeWsResponse = decodeUnknownJsonResult(WsResponseSchema);
 const isWebSocketResponseEnvelope = Schema.is(WebSocketResponse);
+let cachedLocationAuthToken: string | null | undefined;
+let cachedLocationAuthSearch = "";
 
 const isWsPushMessage = (value: WsResponseMessage): value is WsPush =>
   "type" in value && value.type === "push";
 
+function resolveWindowUrl(): URL | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const href = window.location.href;
+  if (typeof href === "string" && href.length > 0) {
+    try {
+      return new URL(href);
+    } catch {
+      // Fall through to the structured location fields below.
+    }
+  }
+
+  const protocol = window.location.protocol ?? "http:";
+  const hostname = window.location.hostname ?? "localhost";
+  const port = window.location.port ? `:${window.location.port}` : "";
+  const pathname = window.location.pathname ?? "/";
+  const search = window.location.search ?? "";
+  const hash = window.location.hash ?? "";
+
+  try {
+    return new URL(`${protocol}//${hostname}${port}${pathname}${search}${hash}`);
+  } catch {
+    return null;
+  }
+}
+
+function consumeLocationAuthToken(): string | null {
+  const windowUrl = resolveWindowUrl();
+  const currentSearch = windowUrl?.search ?? "";
+  if (
+    cachedLocationAuthToken !== undefined &&
+    (cachedLocationAuthToken !== null || cachedLocationAuthSearch === currentSearch)
+  ) {
+    return cachedLocationAuthToken;
+  }
+
+  const authToken = windowUrl ? getWsAuthToken(windowUrl) : null;
+  cachedLocationAuthToken = authToken;
+  cachedLocationAuthSearch = currentSearch;
+
+  if (authToken === null || !windowUrl || typeof window === "undefined") {
+    return cachedLocationAuthToken;
+  }
+
+  try {
+    const sanitizedUrl = new URL(withoutWsAuthToken(windowUrl));
+    const replacement = `${sanitizedUrl.pathname}${sanitizedUrl.search}${sanitizedUrl.hash}`;
+    window.history.replaceState(window.history.state, "", replacement);
+  } catch {
+    // Best-effort cleanup only.
+  }
+
+  return cachedLocationAuthToken;
+}
+
 const resolveDefaultWsUrl = (): string => {
   const bridgeUrl = window.desktopBridge?.getWsUrl();
   if (bridgeUrl && bridgeUrl.length > 0) {
-    return bridgeUrl;
+    return withWsAuthToken(bridgeUrl, consumeLocationAuthToken());
   }
 
   const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
   if (envUrl && envUrl.length > 0) {
-    return envUrl;
+    return withWsAuthToken(envUrl, consumeLocationAuthToken());
   }
 
   const port = window.location.port ? `:${window.location.port}` : "";
-  return `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}${port}`;
+  return withWsAuthToken(
+    `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}${port}`,
+    consumeLocationAuthToken(),
+  );
 };
 
 interface WsRequestEnvelope {

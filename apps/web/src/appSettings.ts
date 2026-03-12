@@ -102,10 +102,20 @@ export function shouldShowFastTierIcon(
 }
 
 const DEFAULT_APP_SETTINGS = AppSettingsSchema.makeUnsafe({});
+const DEFAULT_SECRET_SETTINGS = {
+  kimiApiKey: DEFAULT_APP_SETTINGS.kimiApiKey,
+} satisfies Pick<AppSettings, "kimiApiKey">;
 
 let listeners: Array<() => void> = [];
 let cachedRawSettings: string | null | undefined;
-let cachedSnapshot: AppSettings = DEFAULT_APP_SETTINGS;
+let cachedPersistedSnapshot: AppSettings = {
+  ...DEFAULT_APP_SETTINGS,
+  ...DEFAULT_SECRET_SETTINGS,
+};
+let cachedSecretSettings: Pick<AppSettings, "kimiApiKey"> = DEFAULT_SECRET_SETTINGS;
+let hasHydratedDesktopSecrets = false;
+let secretHydrationPromise: Promise<void> | null = null;
+let secretHydrationVersion = 0;
 
 export function supportsCustomModels(provider: ProviderKind): boolean {
   return PROVIDERS_WITH_CUSTOM_MODEL_SUPPORT.has(provider);
@@ -158,6 +168,16 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customKimiModels: normalizeCustomModelSlugs(settings.customKimiModels, "kimi"),
   };
 }
+
+function normalizeDesktopSecretValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function getAppModelOptions(
   provider: ProviderKind,
   customModels: readonly string[],
@@ -269,25 +289,105 @@ function parsePersistedSettings(value: string | null): AppSettings {
   }
 }
 
+export function sanitizePersistedAppSettingsForStorage(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    ...DEFAULT_SECRET_SETTINGS,
+  };
+}
+
+function mergeSettingsWithSecrets(settings: AppSettings): AppSettings {
+  return normalizeAppSettings(
+    Schema.decodeSync(AppSettingsSchema)({
+      ...settings,
+      ...cachedSecretSettings,
+    }),
+  );
+}
+
+function persistDesktopSecrets(next: Pick<AppSettings, "kimiApiKey">): void {
+  secretHydrationVersion += 1;
+  cachedSecretSettings = next;
+
+  if (typeof window === "undefined" || !window.desktopBridge) {
+    return;
+  }
+
+  void window.desktopBridge
+    .setSecret("kimiApiKey", normalizeDesktopSecretValue(next.kimiApiKey))
+    .catch(() => undefined);
+}
+
+function hydrateDesktopSecretsOnce(): void {
+  if (typeof window === "undefined" || !window.desktopBridge) {
+    return;
+  }
+  if (hasHydratedDesktopSecrets || secretHydrationPromise) {
+    return;
+  }
+
+  const hydrationVersion = secretHydrationVersion;
+  secretHydrationPromise = window.desktopBridge
+    .getSecret("kimiApiKey")
+    .then((secret) => {
+      hasHydratedDesktopSecrets = true;
+      if (secretHydrationVersion !== hydrationVersion) {
+        return;
+      }
+
+      const nextSecret = normalizeDesktopSecretValue(secret) ?? DEFAULT_SECRET_SETTINGS.kimiApiKey;
+      if (cachedSecretSettings.kimiApiKey === nextSecret) {
+        return;
+      }
+
+      cachedSecretSettings = { kimiApiKey: nextSecret };
+      emitChange();
+    })
+    .catch(() => {
+      hasHydratedDesktopSecrets = true;
+    })
+    .finally(() => {
+      secretHydrationPromise = null;
+    });
+}
+
 export function getAppSettingsSnapshot(): AppSettings {
   if (typeof window === "undefined") {
     return DEFAULT_APP_SETTINGS;
   }
 
+  hydrateDesktopSecretsOnce();
+
   const raw = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
-  if (raw === cachedRawSettings) {
-    return cachedSnapshot;
+  if (raw !== cachedRawSettings) {
+    const parsedSettings = parsePersistedSettings(raw);
+    const migratedSecret = normalizeDesktopSecretValue(parsedSettings.kimiApiKey);
+
+    cachedRawSettings = raw;
+    cachedPersistedSnapshot = sanitizePersistedAppSettingsForStorage(parsedSettings);
+
+    if (migratedSecret !== null && cachedSecretSettings.kimiApiKey !== migratedSecret) {
+      persistDesktopSecrets({ kimiApiKey: migratedSecret });
+      const sanitizedRaw = JSON.stringify(cachedPersistedSnapshot);
+      try {
+        if (sanitizedRaw !== cachedRawSettings) {
+          window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, sanitizedRaw);
+        }
+      } catch {
+        // Best-effort migration only.
+      }
+      cachedRawSettings = sanitizedRaw;
+    }
   }
 
-  cachedRawSettings = raw;
-  cachedSnapshot = parsePersistedSettings(raw);
-  return cachedSnapshot;
+  return mergeSettingsWithSecrets(cachedPersistedSnapshot);
 }
 
 function persistSettings(next: AppSettings): void {
   if (typeof window === "undefined") return;
 
-  const raw = JSON.stringify(next);
+  const persistedSettings = sanitizePersistedAppSettingsForStorage(next);
+  const raw = JSON.stringify(persistedSettings);
   try {
     if (raw !== cachedRawSettings) {
       window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, raw);
@@ -297,7 +397,8 @@ function persistSettings(next: AppSettings): void {
   }
 
   cachedRawSettings = raw;
-  cachedSnapshot = next;
+  cachedPersistedSnapshot = persistedSettings;
+  persistDesktopSecrets({ kimiApiKey: next.kimiApiKey });
 }
 
 export function subscribeAppSettings(listener: () => void): () => void {
@@ -308,6 +409,8 @@ export function subscribeAppSettings(listener: () => void): () => void {
       listeners = listeners.filter((entry) => entry !== listener);
     };
   }
+
+  hydrateDesktopSecretsOnce();
 
   const onStorage = (event: StorageEvent) => {
     if (event.key === APP_SETTINGS_STORAGE_KEY) {

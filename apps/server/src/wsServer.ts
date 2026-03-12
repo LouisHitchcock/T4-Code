@@ -7,6 +7,7 @@
  * @module Server
  */
 import http from "node:http";
+import * as NodeFs from "node:fs";
 import type { Duplex } from "node:stream";
 
 import type * as acp from "@agentclientprotocol/sdk";
@@ -86,7 +87,9 @@ import { CopilotAcpManager, readCopilotReasoningEffortSelector } from "./copilot
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { getWsAuthToken } from "@t3tools/shared/wsAuth";
 import { listCodexMcpServerStatuses } from "./codexMcpServerStatus.ts";
+import { isWithinAllowedRoot, resolvePathForContainmentCheck } from "./pathAuthorization";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -278,6 +281,24 @@ function resolveWorkspaceWritePath(params: {
     relativeToRoot === ".." ||
     params.path.isAbsolute(relativeToRoot)
   ) {
+    return Effect.fail(
+      new RouteRequestError({
+        message: "Workspace file path must stay within the project root.",
+      }),
+    );
+  }
+
+  const canonicalWorkspaceRoot = resolvePathForContainmentCheck({
+    requestedPath: params.workspaceRoot,
+    pathExists: NodeFs.existsSync,
+    realpath: NodeFs.realpathSync.native,
+  });
+  const canonicalAbsolutePath = resolvePathForContainmentCheck({
+    requestedPath: absolutePath,
+    pathExists: NodeFs.existsSync,
+    realpath: NodeFs.realpathSync.native,
+  });
+  if (!isWithinAllowedRoot(canonicalAbsolutePath, canonicalWorkspaceRoot)) {
     return Effect.fail(
       new RouteRequestError({
         message: "Workspace file path must stay within the project root.",
@@ -585,17 +606,6 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     } satisfies OrchestrationCommand;
   });
 
-  const isWithinAllowedRoot = (requestedPath: string, rootPath: string): boolean => {
-    const relativeToRoot = toPosixRelativePath(path.relative(rootPath, requestedPath));
-    return (
-      relativeToRoot.length === 0 ||
-      relativeToRoot === "." ||
-      (!relativeToRoot.startsWith("../") &&
-        relativeToRoot !== ".." &&
-        !path.isAbsolute(relativeToRoot))
-    );
-  };
-
   const readAuthorizedWorkspaceRoots = Effect.fnUntraced(function* () {
     const snapshot = yield* projectionReadModelQuery.getSnapshot();
     const roots = new Set<string>([path.resolve(cwd)]);
@@ -619,9 +629,25 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     readonly exactPaths?: ReadonlyArray<string>;
   }) {
     const requestedPath = path.resolve(yield* expandHomePath(input.requestedPath.trim()));
+    const canonicalRequestedPath = resolvePathForContainmentCheck({
+      requestedPath,
+      pathExists: NodeFs.existsSync,
+      realpath: NodeFs.realpathSync.native,
+    });
     const exactPaths = (input.exactPaths ?? []).map((entry) => path.resolve(entry));
     if (exactPaths.includes(requestedPath)) {
       return requestedPath;
+    }
+
+    for (const exactPath of exactPaths) {
+      const canonicalExactPath = resolvePathForContainmentCheck({
+        requestedPath: exactPath,
+        pathExists: NodeFs.existsSync,
+        realpath: NodeFs.realpathSync.native,
+      });
+      if (canonicalExactPath === canonicalRequestedPath) {
+        return requestedPath;
+      }
     }
 
     const roots = yield* readAuthorizedWorkspaceRoots();
@@ -630,7 +656,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
 
     for (const root of roots) {
-      if (isWithinAllowedRoot(requestedPath, root)) {
+      const canonicalRoot = resolvePathForContainmentCheck({
+        requestedPath: root,
+        pathExists: NodeFs.existsSync,
+        realpath: NodeFs.realpathSync.native,
+      });
+      if (isWithinAllowedRoot(canonicalRequestedPath, canonicalRoot)) {
         return requestedPath;
       }
     }
@@ -720,7 +751,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
         // In dev mode, redirect to Vite dev server
         if (devUrl) {
-          respond(302, { Location: devUrl.href });
+          const redirectUrl = new URL(devUrl.toString());
+          const basePath = redirectUrl.pathname.endsWith("/")
+            ? redirectUrl.pathname.slice(0, -1)
+            : redirectUrl.pathname;
+          const requestPath = url.pathname === "/" ? "" : url.pathname;
+          redirectUrl.pathname = `${basePath}${requestPath}` || "/";
+          redirectUrl.search = url.search;
+          respond(302, { Location: redirectUrl.toString() });
           return;
         }
 
@@ -1286,7 +1324,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       let providedToken: string | null = null;
       try {
         const url = new URL(request.url ?? "/", `http://localhost:${port}`);
-        providedToken = url.searchParams.get("token");
+        providedToken = getWsAuthToken(url);
       } catch {
         rejectUpgrade(socket, 400, "Invalid WebSocket URL");
         return;

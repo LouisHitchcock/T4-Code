@@ -19,6 +19,7 @@ import { Server, type ServerShape } from "./wsServer";
 
 const start = vi.fn(() => undefined);
 const stop = vi.fn(() => undefined);
+const openBrowser = vi.fn((_target: string) => undefined);
 let resolvedConfig: ServerConfigShape | null = null;
 const serverStart = Effect.acquireRelease(
   Effect.gen(function* () {
@@ -48,7 +49,10 @@ const testLayer = Layer.mergeAll(
     stopSignal: Effect.void,
   } satisfies ServerShape),
   Layer.succeed(Open, {
-    openBrowser: (_target: string) => Effect.void,
+    openBrowser: (target: string) =>
+      Effect.sync(() => {
+        openBrowser(target);
+      }),
     openInEditor: () => Effect.void,
   } satisfies OpenShape),
   AnalyticsService.layerTest,
@@ -80,6 +84,7 @@ beforeEach(() => {
   resolvedConfig = null;
   start.mockImplementation(() => undefined);
   stop.mockImplementation(() => undefined);
+  openBrowser.mockImplementation((_target: string) => undefined);
   findAvailablePort.mockImplementation((preferred: number) => Effect.succeed(preferred));
 });
 
@@ -175,6 +180,17 @@ it.layer(testLayer)("server CLI command", (it) => {
 
       assert.equal(start.mock.calls.length, 1);
       assert.equal(resolvedConfig?.noBrowser, true);
+    }),
+  );
+
+  it.effect("opens a tokenized browser url when auth is enabled", () =>
+    Effect.gen(function* () {
+      yield* runCli([], {
+        T3CODE_NO_BROWSER: "false",
+        T3CODE_AUTH_TOKEN: "env-token",
+      });
+
+      assert.deepStrictEqual(openBrowser.mock.calls, [["http://127.0.0.1:3773/?token=env-token"]]);
     }),
   );
 

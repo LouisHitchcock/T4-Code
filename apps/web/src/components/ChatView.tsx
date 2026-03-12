@@ -4704,8 +4704,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
               />
             </label>
             <p className="text-xs text-muted-foreground">
-              The key is stored locally on this device and is only used when starting new Kimi Code
-              sessions.
+              {isElectron
+                ? "The key stays in the desktop session and is persisted in your OS credential store when secure storage is available."
+                : "The key stays only in memory for the current browser session."}{" "}
+              It is only used when starting new Kimi Code sessions.
             </p>
             {kimiApiKeyError ? <p className="text-xs text-destructive">{kimiApiKeyError}</p> : null}
           </DialogPanel>

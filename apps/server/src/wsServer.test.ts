@@ -470,6 +470,10 @@ describe("WebSocket Server", () => {
     return dir;
   }
 
+  function createDirectorySymlink(target: string, linkPath: string): void {
+    fs.symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
+  }
+
   async function createTestServer(
     options: {
       persistenceLayer?: Layer.Layer<
@@ -670,6 +674,25 @@ describe("WebSocket Server", () => {
     const response = await requestPath(port, "/..%2f..%2fetc/passwd");
     expect(response.statusCode).toBe(400);
     expect(response.body).toBe("Invalid static file path");
+  });
+
+  it("preserves auth query params when redirecting to the Vite dev server", async () => {
+    server = await createTestServer({
+      cwd: "/test/project",
+      devUrl: "http://127.0.0.1:5173/app/",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}/chat?token=secret-token`, {
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "http://127.0.0.1:5173/app/chat?token=secret-token",
+    );
   });
 
   it("bootstraps the cwd project on startup when enabled", async () => {
@@ -1654,6 +1677,29 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it("rejects project search requests that escape through symlinked directories", async () => {
+    const workspace = makeTempDir("t3code-ws-symlink-search-");
+    const outside = makeTempDir("t3code-ws-symlink-search-outside-");
+    const linkPath = path.join(workspace, "outside-link");
+    createDirectorySymlink(outside, linkPath);
+
+    server = await createTestServer({ cwd: workspace });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsSearchEntries, {
+      cwd: linkPath,
+      query: "anything",
+      limit: 10,
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain("current project, worktree, or trusted app paths");
+  });
+
   it("supports projects.writeFile within the workspace root", async () => {
     const workspace = makeTempDir("t3code-ws-write-file-");
 
@@ -1700,6 +1746,32 @@ describe("WebSocket Server", () => {
       "Workspace file path must stay within the project root.",
     );
     expect(fs.existsSync(path.join(workspace, "..", "escape.md"))).toBe(false);
+  });
+
+  it("rejects projects.writeFile paths that escape through symlinked directories", async () => {
+    const workspace = makeTempDir("t3code-ws-write-file-symlink-");
+    const outside = makeTempDir("t3code-ws-write-file-symlink-outside-");
+    const linkPath = path.join(workspace, "outside-link");
+    createDirectorySymlink(outside, linkPath);
+
+    server = await createTestServer({ cwd: workspace });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsWriteFile, {
+      cwd: workspace,
+      relativePath: "outside-link/escape.md",
+      contents: "# no\n",
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain(
+      "Workspace file path must stay within the project root.",
+    );
+    expect(fs.existsSync(path.join(outside, "escape.md"))).toBe(false);
   });
 
   it("rejects project file writes outside authorized workspaces", async () => {

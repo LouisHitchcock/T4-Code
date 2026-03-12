@@ -74,7 +74,19 @@ beforeEach(() => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      location: { hostname: "localhost", port: "3020" },
+      location: {
+        href: "http://localhost:3020/",
+        protocol: "http:",
+        hostname: "localhost",
+        port: "3020",
+        pathname: "/",
+        search: "",
+        hash: "",
+      },
+      history: {
+        state: null,
+        replaceState: vi.fn(),
+      },
       desktopBridge: undefined,
     },
   });
@@ -358,13 +370,52 @@ describe("WsTransport", () => {
   it("omits the port delimiter when the page uses a default port", () => {
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { protocol: "https:", hostname: "example.com", port: "" },
+      value: {
+        href: "https://example.com/",
+        protocol: "https:",
+        hostname: "example.com",
+        port: "",
+        pathname: "/",
+        search: "",
+        hash: "",
+      },
     });
 
     const transport = new WsTransport();
     const socket = getSocket();
 
     expect(socket.url).toBe("wss://example.com");
+
+    transport.dispose();
+  });
+
+  it("applies the page auth token to the websocket url and removes it from the visible location", () => {
+    const replaceState = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        href: "http://localhost:3020/?token=secret-token&view=settings#plans",
+        protocol: "http:",
+        hostname: "localhost",
+        port: "3020",
+        pathname: "/",
+        search: "?token=secret-token&view=settings",
+        hash: "#plans",
+      },
+    });
+    Object.defineProperty(window, "history", {
+      configurable: true,
+      value: {
+        state: null,
+        replaceState,
+      },
+    });
+
+    const transport = new WsTransport();
+    const socket = getSocket();
+
+    expect(socket.url).toBe("ws://localhost:3020/?token=secret-token");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/?view=settings#plans");
 
     transport.dispose();
   });
