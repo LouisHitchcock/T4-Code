@@ -407,6 +407,35 @@
   --warning-foreground: #f0b72f;
 }
 
+:root[data-theme="lilac"] {
+  color-scheme: dark;
+  --background: #080709;
+  --foreground: #e0ceed;
+  --card: #151217;
+  --card-foreground: #e0ceed;
+  --popover: #151217;
+  --popover-foreground: #e0ceed;
+  --primary: #b657ff;
+  --primary-foreground: #ffffff;
+  --secondary: #100e12;
+  --secondary-foreground: #e0ceed;
+  --muted: #100e12;
+  --muted-foreground: #8e6da6;
+  --accent: #211d26;
+  --accent-foreground: #e0ceed;
+  --destructive: #e61f44;
+  --border: #3b3442;
+  --input: #000000;
+  --ring: #a29dfa;
+  --destructive-foreground: #ffffff;
+  --info: #9d37fc;
+  --info-foreground: #ffffff;
+  --success: #a7da1e;
+  --success-foreground: #080709;
+  --warning: #f7b83d;
+  --warning-foreground: #080709;
+}
+
 :root[data-theme="nord"] {
   color-scheme: dark;
   --background: #2e3440;
@@ -506,6 +535,20 @@
   background: #24202d;
   border-color: #302b3c;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+:root[data-theme="lilac"] body {
+  background-image:
+    radial-gradient(circle at top, rgba(182, 87, 255, 0.2), transparent 34%),
+    radial-gradient(circle at 14% 0%, rgba(162, 157, 250, 0.16), transparent 24%),
+    linear-gradient(180deg, #100e12 0%, #080709 42%, #080709 100%);
+  background-attachment: fixed;
+}
+
+:root[data-theme="lilac"] [data-chat-composer-surface="true"] {
+  background: #100e12;
+  border-color: #3b3442;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 body {

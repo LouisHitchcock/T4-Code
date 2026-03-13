@@ -7,6 +7,7 @@ export type SupportedHighlighterThemeName =
   | "github-dark-default"
   | "github-dark-dimmed"
   | "github-dark-high-contrast"
+  | "lilac"
   | "nord"
   | "dark-plus";
 
@@ -17,6 +18,7 @@ export const APPLIED_CUSTOM_THEME_IDS = [
   "github-dark-default",
   "github-dark-dimmed",
   "github-dark-high-contrast",
+  "lilac",
   "nord",
   "visual-studio-2017-dark",
   "t3-chat-theme",
@@ -28,7 +30,7 @@ export interface AppliedCustomTheme {
   id: AppliedCustomThemeId;
   label: string;
   description: string;
-  family: "catppuccin" | "github" | "nord" | "visual-studio" | "t3";
+  family: "catppuccin" | "github" | "lilac" | "nord" | "visual-studio" | "t3";
   appearance: ThemeAppearance;
   dataTheme: AppliedCustomThemeId;
   diffThemeName: SupportedHighlighterThemeName;
@@ -88,6 +90,15 @@ export const APPLIED_CUSTOM_THEMES = {
     appearance: "dark",
     dataTheme: "github-dark-high-contrast",
     diffThemeName: "github-dark-high-contrast",
+  },
+  lilac: {
+    id: "lilac",
+    label: "Lilac",
+    description: "The original Lilac pastel dark theme by shubham-saudolla.",
+    family: "lilac",
+    appearance: "dark",
+    dataTheme: "lilac",
+    diffThemeName: "lilac",
   },
   nord: {
     id: "nord",

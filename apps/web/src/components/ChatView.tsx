@@ -125,6 +125,7 @@ import {
 } from "../types";
 import { basenameOfPath, getVscodeIconUrlForEntry } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
+import { useChatBackgroundImage } from "../hooks/useChatBackgroundImage";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import {
   buildTurnDiffTree,
@@ -704,6 +705,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     select: (params) => parseDiffRouteSearch(params),
   });
   const { resolvedTheme } = useTheme();
+  const chatBackgroundImage = useChatBackgroundImage(
+    settings.chatBackgroundImageAssetId,
+    settings.chatBackgroundImageDataUrl,
+  );
+  const chatBackgroundFadePercent = Math.min(
+    100,
+    Math.max(0, settings.chatBackgroundImageFadePercent),
+  );
+  const chatBackgroundBlurPx = Math.min(24, Math.max(0, settings.chatBackgroundImageBlurPx));
+  const chatBackgroundImageOpacity = Math.max(0, (100 - chatBackgroundFadePercent) / 100);
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
   const composerDraft = useComposerThreadDraft(threadId);
@@ -3978,11 +3989,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {chatBackgroundImage.url ? (
+            <div className="pointer-events-none absolute inset-0">
+              <div
+                className="absolute inset-[-2rem] scale-105 bg-cover bg-center bg-no-repeat"
+                style={{
+                  backgroundImage: `url(${chatBackgroundImage.url})`,
+                  filter: `blur(${chatBackgroundBlurPx}px)`,
+                  opacity: chatBackgroundImageOpacity,
+                }}
+              />
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_72%,transparent),color-mix(in_srgb,var(--background)_88%,transparent)_45%,color-mix(in_srgb,var(--background)_96%,transparent))]" />
+            </div>
+          ) : null}
           {/* Messages */}
           <div
             ref={setMessagesScrollContainerRef}
-            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+            className="relative z-10 min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
             onScroll={onMessagesScroll}
             onClickCapture={onMessagesClickCapture}
             onWheel={onMessagesWheel}
@@ -4020,7 +4044,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </div>
 
           {/* Input bar */}
-          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+          <div
+            className={cn(
+              "relative z-10 px-3 pt-1.5 sm:px-5 sm:pt-2",
+              isGitRepo ? "pb-1" : "pb-3 sm:pb-4",
+            )}
+          >
             <form
               ref={composerFormRef}
               onSubmit={onSend}
@@ -4681,8 +4710,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           <DialogHeader>
             <DialogTitle>Enter your Kimi API key</DialogTitle>
             <DialogDescription>
-              CUT3 needs a Kimi Code API key to start Kimi CLI sessions for chat. You can
-              generate one from the Kimi Code Console.
+              CUT3 needs a Kimi Code API key to start Kimi CLI sessions for chat. You can generate
+              one from the Kimi Code Console.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-3">

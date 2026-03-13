@@ -46,6 +46,7 @@ describe("resolveAppliedCustomThemeId", () => {
   });
 
   it("returns explicit preset ids unchanged", () => {
+    expect(resolveAppliedCustomThemeId("lilac", "light")).toBe("lilac");
     expect(resolveAppliedCustomThemeId("nord", "light")).toBe("nord");
     expect(resolveAppliedCustomThemeId("visual-studio-2017-dark", "dark")).toBe(
       "visual-studio-2017-dark",
@@ -56,6 +57,7 @@ describe("resolveAppliedCustomThemeId", () => {
 describe("resolveAppliedCustomTheme", () => {
   it("returns the applied preset metadata", () => {
     expect(resolveAppliedCustomTheme("catppuccin-auto", "dark")?.label).toBe("Catppuccin Mocha");
+    expect(resolveAppliedCustomTheme("lilac", "dark")?.label).toBe("Lilac");
     expect(resolveAppliedCustomTheme("github-dark-dimmed", "light")?.appearance).toBe("dark");
     expect(resolveAppliedCustomTheme("t3-chat-theme", "dark")?.label).toBe("T3 Chat Theme");
   });
@@ -64,6 +66,7 @@ describe("resolveAppliedCustomTheme", () => {
 describe("resolvePinnedCustomThemeAppearance", () => {
   it("returns pinned appearances for fixed presets only", () => {
     expect(resolvePinnedCustomThemeAppearance("catppuccin-latte")).toBe("light");
+    expect(resolvePinnedCustomThemeAppearance("lilac")).toBe("dark");
     expect(resolvePinnedCustomThemeAppearance("nord")).toBe("dark");
     expect(resolvePinnedCustomThemeAppearance("t3-chat-theme")).toBe("dark");
     expect(resolvePinnedCustomThemeAppearance("catppuccin-auto")).toBeNull();

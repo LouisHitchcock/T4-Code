@@ -55,6 +55,7 @@ describe("ALL_DIFF_THEME_NAMES", () => {
       "github-dark-default",
       "github-dark-dimmed",
       "github-dark-high-contrast",
+      "lilac",
       "nord",
       "dark-plus",
     ]);

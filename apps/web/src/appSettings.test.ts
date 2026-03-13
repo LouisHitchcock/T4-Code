@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX,
+  DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT,
   getAppSettingsSnapshot,
   getAppModelOptions,
   getSlashModelOptions,
+  MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX,
+  MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH,
   normalizeCustomModelSlugs,
   resolveAppModelSelection,
   sanitizePersistedAppSettingsForStorage,
@@ -154,6 +158,23 @@ describe("sanitizePersistedAppSettingsForStorage", () => {
     expect(sanitized.kimiBinaryPath).toBe(getAppSettingsSnapshot().kimiBinaryPath);
   });
 
+  it("preserves non-secret chat background settings", () => {
+    const sanitized = sanitizePersistedAppSettingsForStorage({
+      ...getAppSettingsSnapshot(),
+      chatBackgroundImageDataUrl: "data:image/png;base64,abc123",
+      chatBackgroundImageAssetId: "background-asset-123",
+      chatBackgroundImageName: "wallpaper.png",
+      chatBackgroundImageFadePercent: 42,
+      chatBackgroundImageBlurPx: 8,
+    });
+
+    expect(sanitized.chatBackgroundImageDataUrl).toBe("data:image/png;base64,abc123");
+    expect(sanitized.chatBackgroundImageAssetId).toBe("background-asset-123");
+    expect(sanitized.chatBackgroundImageName).toBe("wallpaper.png");
+    expect(sanitized.chatBackgroundImageFadePercent).toBe(42);
+    expect(sanitized.chatBackgroundImageBlurPx).toBe(8);
+  });
+
   it("returns a stable snapshot reference when storage has not changed", () => {
     const localStorage = {
       getItem: () => null,
@@ -177,5 +198,21 @@ describe("sanitizePersistedAppSettingsForStorage", () => {
     } finally {
       Reflect.deleteProperty(globalThis, "window");
     }
+  });
+});
+
+describe("chat background settings defaults", () => {
+  it("uses empty defaults for the optional chat background fields", () => {
+    const snapshot = getAppSettingsSnapshot();
+
+    expect(snapshot.chatBackgroundImageDataUrl).toBe("");
+    expect(snapshot.chatBackgroundImageAssetId).toBe("");
+    expect(snapshot.chatBackgroundImageName).toBe("");
+    expect(snapshot.chatBackgroundImageFadePercent).toBe(
+      DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT,
+    );
+    expect(snapshot.chatBackgroundImageBlurPx).toBe(DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX);
+    expect(MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH).toBeGreaterThan(0);
+    expect(MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX).toBeGreaterThan(0);
   });
 });

@@ -13,6 +13,11 @@ import { CUSTOM_THEME_IDS } from "./lib/customThemes";
 const APP_SETTINGS_STORAGE_KEY = "cut3:app-settings:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
+export const MAX_CHAT_BACKGROUND_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH = 1_500_000;
+export const MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX = 24;
+export const DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT = 64;
+export const DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX = 0;
 export const APP_SERVICE_TIER_OPTIONS = [
   {
     value: "auto",
@@ -61,6 +66,23 @@ const AppSettingsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
   customThemeId: CustomThemeIdSchema.pipe(Schema.withConstructorDefault(() => Option.some("none"))),
+  chatBackgroundImageDataUrl: Schema.String.check(
+    Schema.isMaxLength(MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH),
+  ).pipe(Schema.withConstructorDefault(() => Option.some(""))),
+  chatBackgroundImageAssetId: Schema.String.check(Schema.isMaxLength(512)).pipe(
+    Schema.withConstructorDefault(() => Option.some("")),
+  ),
+  chatBackgroundImageName: Schema.String.check(Schema.isMaxLength(512)).pipe(
+    Schema.withConstructorDefault(() => Option.some("")),
+  ),
+  chatBackgroundImageFadePercent: Schema.Int.check(
+    Schema.isBetween({ minimum: 0, maximum: 100 }),
+  ).pipe(
+    Schema.withConstructorDefault(() => Option.some(DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT)),
+  ),
+  chatBackgroundImageBlurPx: Schema.Int.check(
+    Schema.isBetween({ minimum: 0, maximum: MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX }),
+  ).pipe(Schema.withConstructorDefault(() => Option.some(DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),

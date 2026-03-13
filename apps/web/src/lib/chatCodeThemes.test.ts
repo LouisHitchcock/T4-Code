@@ -6,6 +6,7 @@ import {
   T3_CHAT_CODE_THEME_BACKGROUND,
   T3_CHAT_CODE_THEME_NAME,
 } from "./chatCodeThemes";
+import { LILAC_THEME_NAME } from "./lilacTheme";
 
 describe("resolveChatCodeThemeName", () => {
   it("uses the dedicated chat code theme for the T3 Chat preset", () => {
@@ -14,6 +15,7 @@ describe("resolveChatCodeThemeName", () => {
 
   it("falls back to the integrated diff/code themes for other presets", () => {
     expect(resolveChatCodeThemeName("dark", "github-dark")).toBe("github-dark");
+    expect(resolveChatCodeThemeName("dark", "lilac")).toBe(LILAC_THEME_NAME);
     expect(resolveChatCodeThemeName("light", null)).toBe("pierre-light");
   });
 });
@@ -21,6 +23,7 @@ describe("resolveChatCodeThemeName", () => {
 describe("ALL_CHAT_CODE_THEME_NAMES", () => {
   it("includes the dedicated T3 Chat code theme alongside the bundled themes", () => {
     expect(ALL_CHAT_CODE_THEME_NAMES).toContain(T3_CHAT_CODE_THEME_NAME);
+    expect(ALL_CHAT_CODE_THEME_NAMES).toContain(LILAC_THEME_NAME);
     expect(ALL_CHAT_CODE_THEME_NAMES).toContain("catppuccin-mocha");
     expect(ALL_CHAT_CODE_THEME_NAMES).toContain("pierre-dark");
   });

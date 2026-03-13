@@ -2,6 +2,7 @@ import { registerCustomTheme, type ThemeRegistrationResolved } from "@pierre/dif
 
 import { type AppliedCustomThemeId } from "./customThemes";
 import { ALL_DIFF_THEME_NAMES, resolveDiffThemeName, type DiffThemeName } from "./diffRendering";
+import { ensureSharedHighlighterThemesRegistered } from "./highlighterThemeRegistry";
 
 export const T3_CHAT_CODE_THEME_NAME = "t3-chat-code-dark" as const;
 export const T3_CHAT_CODE_THEME_BACKGROUND = "#1a1821" as const;
@@ -116,6 +117,7 @@ export function ensureChatCodeThemesRegistered(): void {
     return;
   }
 
+  ensureSharedHighlighterThemesRegistered();
   registerCustomTheme(T3_CHAT_CODE_THEME_NAME, () => Promise.resolve(T3_CHAT_CODE_THEME));
   chatCodeThemesRegistered = true;
 }

@@ -4,6 +4,9 @@ import {
   type AppliedCustomThemeId,
   type SupportedHighlighterThemeName,
 } from "./customThemes";
+import { ensureSharedHighlighterThemesRegistered } from "./highlighterThemeRegistry";
+
+ensureSharedHighlighterThemesRegistered();
 
 const DEFAULT_DIFF_THEME_NAMES = {
   light: "pierre-light",

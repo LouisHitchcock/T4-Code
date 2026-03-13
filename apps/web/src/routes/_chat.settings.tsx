@@ -1,19 +1,26 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { ZapIcon } from "lucide-react";
+import { ImagePlusIcon, LoaderCircleIcon, Trash2Icon, ZapIcon } from "lucide-react";
 
 import {
   APP_SERVICE_TIER_OPTIONS,
+  DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX,
+  DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT,
+  MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX,
+  MAX_CHAT_BACKGROUND_IMAGE_BYTES,
+  MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH,
   MAX_CUSTOM_MODEL_LENGTH,
   shouldShowFastTierIcon,
   useAppSettings,
 } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
+import { useChatBackgroundImage } from "../hooks/useChatBackgroundImage";
 import { useTheme } from "../hooks/useTheme";
+import { removeChatBackgroundBlob, saveChatBackgroundBlob } from "../lib/chatBackgroundStorage";
 import {
   CUSTOM_THEME_OPTIONS,
   CUSTOM_THEME_OPTIONS_BY_ID,
@@ -81,6 +88,34 @@ const MODEL_PROVIDER_SETTINGS: Array<{
 const VISIBLE_CUSTOM_THEME_PRESET_LABELS = CUSTOM_THEME_OPTIONS.filter(
   (option) => option.id !== "none" && option.id !== "catppuccin-auto",
 ).map((option) => option.label);
+const CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL = `${Math.round(
+  MAX_CHAT_BACKGROUND_IMAGE_BYTES / (1024 * 1024),
+)}MB`;
+
+function clampChatBackgroundFadePercent(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function clampChatBackgroundBlurPx(value: number): number {
+  return Math.min(MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX, Math.max(0, Math.round(value)));
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("Could not read image data."));
+    });
+    reader.addEventListener("error", () => {
+      reject(reader.error ?? new Error("Failed to read image."));
+    });
+    reader.readAsDataURL(file);
+  });
+}
 
 function formatNaturalList(values: readonly string[]): string {
   if (values.length <= 1) {
@@ -153,6 +188,8 @@ function SettingsRouteView() {
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [chatBackgroundError, setChatBackgroundError] = useState<string | null>(null);
+  const [isUpdatingChatBackground, setIsUpdatingChatBackground] = useState(false);
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
@@ -163,6 +200,7 @@ function SettingsRouteView() {
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
   >({});
+  const chatBackgroundFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
@@ -173,6 +211,19 @@ function SettingsRouteView() {
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const selectedCustomTheme = CUSTOM_THEME_OPTIONS_BY_ID[customThemeId];
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const hasChatBackgroundImage =
+    settings.chatBackgroundImageAssetId.length > 0 ||
+    settings.chatBackgroundImageDataUrl.length > 0;
+  const chatBackgroundPreview = useChatBackgroundImage(
+    settings.chatBackgroundImageAssetId,
+    settings.chatBackgroundImageDataUrl,
+  );
+  const hasChatBackgroundImageSource = chatBackgroundPreview.url !== null;
+  const chatBackgroundFadePercent = clampChatBackgroundFadePercent(
+    settings.chatBackgroundImageFadePercent,
+  );
+  const chatBackgroundBlurPx = clampChatBackgroundBlurPx(settings.chatBackgroundImageBlurPx);
+  const chatBackgroundImageOpacity = Math.max(0, (100 - chatBackgroundFadePercent) / 100);
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -261,6 +312,92 @@ function SettingsRouteView() {
     [settings, updateSettings],
   );
 
+  const openChatBackgroundPicker = useCallback(() => {
+    setChatBackgroundError(null);
+    chatBackgroundFileInputRef.current?.click();
+  }, []);
+
+  const removeChatBackgroundImage = useCallback(() => {
+    const existingAssetId = settings.chatBackgroundImageAssetId.trim();
+    setChatBackgroundError(null);
+    updateSettings({
+      chatBackgroundImageDataUrl: defaults.chatBackgroundImageDataUrl,
+      chatBackgroundImageAssetId: defaults.chatBackgroundImageAssetId,
+      chatBackgroundImageName: defaults.chatBackgroundImageName,
+    });
+    if (chatBackgroundFileInputRef.current) {
+      chatBackgroundFileInputRef.current.value = "";
+    }
+    if (existingAssetId) {
+      void removeChatBackgroundBlob(existingAssetId).catch(() => undefined);
+    }
+  }, [
+    defaults.chatBackgroundImageAssetId,
+    defaults.chatBackgroundImageDataUrl,
+    defaults.chatBackgroundImageName,
+    settings.chatBackgroundImageAssetId,
+    updateSettings,
+  ]);
+
+  const handleChatBackgroundFileChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        setChatBackgroundError("Choose an image file.");
+        return;
+      }
+
+      if (file.size > MAX_CHAT_BACKGROUND_IMAGE_BYTES) {
+        setChatBackgroundError(
+          `Choose an image up to ${CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL} so it can be saved locally.`,
+        );
+        return;
+      }
+
+      setChatBackgroundError(null);
+      setIsUpdatingChatBackground(true);
+      try {
+        const nextAssetId = crypto.randomUUID();
+        await saveChatBackgroundBlob(nextAssetId, file);
+        const previousAssetId = settings.chatBackgroundImageAssetId.trim();
+        const dataUrlCandidate =
+          file.size <= MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH
+            ? await readFileAsDataUrl(file)
+            : "";
+        updateSettings({
+          chatBackgroundImageAssetId: nextAssetId,
+          chatBackgroundImageDataUrl:
+            dataUrlCandidate.length <= MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH
+              ? dataUrlCandidate
+              : "",
+          chatBackgroundImageName: file.name || "background image",
+        });
+        if (previousAssetId && previousAssetId !== nextAssetId) {
+          void removeChatBackgroundBlob(previousAssetId).catch(() => undefined);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("IndexedDB")) {
+          setChatBackgroundError(
+            "This browser could not persist the chat background image locally.",
+          );
+        }
+        if (!(error instanceof Error && error.message.includes("IndexedDB"))) {
+          setChatBackgroundError(
+            error instanceof Error ? error.message : "Failed to load the selected image.",
+          );
+        }
+      } finally {
+        setIsUpdatingChatBackground(false);
+      }
+    },
+    [settings.chatBackgroundImageAssetId, updateSettings],
+  );
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
@@ -333,6 +470,181 @@ function SettingsRouteView() {
                 Active appearance:{" "}
                 <span className="font-medium text-foreground">{resolvedTheme}</span>
               </p>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Chat background</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Add a custom image behind the chat timeline on this device.
+                </p>
+              </div>
+
+              <input
+                ref={chatBackgroundFileInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={handleChatBackgroundFileChange}
+              />
+
+              <div className="space-y-4">
+                <div className="overflow-hidden rounded-xl border border-border bg-background/60">
+                  {hasChatBackgroundImageSource ? (
+                    <div className="aspect-[16/7] overflow-hidden">
+                      <div
+                        className="h-full w-full scale-105 bg-cover bg-center bg-no-repeat"
+                        style={{
+                          backgroundImage: `linear-gradient(180deg, rgb(0 0 0 / 8%), rgb(0 0 0 / 32%)), url(${chatBackgroundPreview.url})`,
+                          filter: `blur(${chatBackgroundBlurPx}px)`,
+                          opacity: chatBackgroundImageOpacity,
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="aspect-[16/7] bg-[linear-gradient(135deg,var(--color-neutral-200),transparent_55%),linear-gradient(180deg,var(--background),color-mix(in_srgb,var(--background)_80%,var(--primary)))] dark:bg-[linear-gradient(135deg,var(--color-neutral-800),transparent_55%),linear-gradient(180deg,var(--background),color-mix(in_srgb,var(--background)_88%,var(--primary)))]" />
+                  )}
+
+                  <div className="border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                    <p>
+                      Status:{" "}
+                      <span className="font-medium text-foreground">
+                        {hasChatBackgroundImage ? "Custom image active" : "Default background"}
+                      </span>
+                    </p>
+                    <p className="mt-1">
+                      File:{" "}
+                      <span className="font-medium text-foreground">
+                        {settings.chatBackgroundImageName || "None"}
+                      </span>
+                    </p>
+                    <p className="mt-1">
+                      Fade:{" "}
+                      <span className="font-medium text-foreground">
+                        {chatBackgroundFadePercent}%
+                      </span>
+                    </p>
+                    <p className="mt-1">
+                      Blur:{" "}
+                      <span className="font-medium text-foreground">{chatBackgroundBlurPx}px</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={openChatBackgroundPicker}
+                    disabled={isUpdatingChatBackground}
+                  >
+                    {isUpdatingChatBackground ? (
+                      <LoaderCircleIcon className="size-4 animate-spin" />
+                    ) : (
+                      <ImagePlusIcon className="size-4" />
+                    )}
+                    {hasChatBackgroundImage ? "Change background" : "Add background"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={removeChatBackgroundImage}
+                    disabled={!hasChatBackgroundImageSource || isUpdatingChatBackground}
+                  >
+                    <Trash2Icon className="size-4" />
+                    Remove background
+                  </Button>
+                </div>
+
+                <div className="space-y-4 rounded-xl border border-border bg-background/50 px-3 py-3">
+                  <label className="block space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-medium text-foreground">Fade</span>
+                      <span className="text-xs text-muted-foreground">
+                        {chatBackgroundFadePercent}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={chatBackgroundFadePercent}
+                      disabled={!hasChatBackgroundImageSource}
+                      onChange={(event) =>
+                        updateSettings({
+                          chatBackgroundImageFadePercent: clampChatBackgroundFadePercent(
+                            Number(event.target.value),
+                          ),
+                        })
+                      }
+                      className="w-full accent-primary disabled:cursor-not-allowed disabled:opacity-45"
+                      aria-label="Background fade"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Lower values reveal more of the image. Higher values fade it into the chat
+                      surface.
+                    </p>
+                  </label>
+
+                  <label className="block space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-medium text-foreground">Blur</span>
+                      <span className="text-xs text-muted-foreground">
+                        {chatBackgroundBlurPx}px
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX}
+                      step={1}
+                      value={chatBackgroundBlurPx}
+                      disabled={!hasChatBackgroundImageSource}
+                      onChange={(event) =>
+                        updateSettings({
+                          chatBackgroundImageBlurPx: clampChatBackgroundBlurPx(
+                            Number(event.target.value),
+                          ),
+                        })
+                      }
+                      className="w-full accent-primary disabled:cursor-not-allowed disabled:opacity-45"
+                      aria-label="Background blur"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Increase blur to soften detailed wallpapers behind message content.
+                    </p>
+                  </label>
+
+                  {(chatBackgroundFadePercent !== DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT ||
+                    chatBackgroundBlurPx !== DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX) && (
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() =>
+                          updateSettings({
+                            chatBackgroundImageFadePercent:
+                              DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT,
+                            chatBackgroundImageBlurPx: DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX,
+                          })
+                        }
+                      >
+                        Reset image effects
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  CUT3 stores this image in local app settings on this device. Keep it at or under{" "}
+                  <code>{CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL}</code>.
+                </p>
+                {chatBackgroundError ? (
+                  <p className="text-xs text-destructive">{chatBackgroundError}</p>
+                ) : null}
+              </div>
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-5">

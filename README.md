@@ -6,6 +6,10 @@
 
 CUT3 is a minimal web GUI for coding agents. It currently supports Codex, GitHub Copilot, and Kimi Code, with Claude Code coming soon.
 
+## Screenshot
+
+![CUT3 screenshot](./CUT3.png)
+
 ## Supported providers
 
 - Codex
