@@ -163,7 +163,7 @@ function ChatRouteLayoutContent() {
 
 function ChatRouteLayout() {
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen dir="ltr">
       <ChatRouteLayoutContent />
     </SidebarProvider>
   );

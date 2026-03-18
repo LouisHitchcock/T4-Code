@@ -13,9 +13,9 @@ import {
   MAX_CHAT_BACKGROUND_IMAGE_BYTES,
   MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH,
   MAX_CUSTOM_MODEL_LENGTH,
-  shouldShowFastTierIcon,
   useAppSettings,
 } from "../appSettings";
+import { getAppLanguageDetails, type AppLanguage } from "../appLanguage";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useChatBackgroundImage } from "../hooks/useChatBackgroundImage";
@@ -47,7 +47,7 @@ import { APP_VERSION } from "../branding";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 const MODEL_PROVIDER_SETTINGS: Array<{
-  provider: ProviderKind;
+  provider: Extract<ProviderKind, "copilot" | "kimi">;
   title: string;
   description: string;
   placeholder: string;
@@ -68,6 +68,337 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     example: "kimi-for-coding",
   },
 ] as const;
+
+function getSettingsCopy(language: AppLanguage) {
+  if (language === "fa") {
+    return {
+      settingsLabel: "تنظیمات",
+      settingsDescription: "ترجیحات برنامه برای این دستگاه را تنظیم کنید.",
+      chatBackgroundTitle: "پس زمینه گفتگو",
+      chatBackgroundDescription: "یک تصویر سفارشی پشت خط زمانی گفتگو در این دستگاه قرار دهید.",
+      status: "وضعیت",
+      customImageActive: "تصویر سفارشی فعال است",
+      defaultBackground: "پس زمینه پیش فرض",
+      file: "فایل",
+      none: "هیچ کدام",
+      fade: "محو شدگی",
+      blur: "تار شدگی",
+      changeBackground: "تغییر پس زمینه",
+      addBackground: "افزودن پس زمینه",
+      removeBackground: "حذف پس زمینه",
+      fadeDescription:
+        "مقادیر کمتر تصویر را بیشتر نشان می دهند. مقادیر بیشتر آن را در سطح گفتگو محو می کنند.",
+      blurDescription: "برای نرم تر شدن والپیپرهای پرجزئیات پشت پیام ها، تاری را بیشتر کنید.",
+      resetImageEffects: "بازنشانی افکت های تصویر",
+      imageStorageNote: (sizeLabel: string) =>
+        `CUT3 این تصویر را در تنظیمات محلی همین دستگاه نگه می دارد. اندازه آن را حداکثر ${sizeLabel} نگه دارید.`,
+      chooseImageFile: "یک فایل تصویری انتخاب کنید.",
+      imageTooLarge: (sizeLabel: string) =>
+        `یک تصویر حداکثر ${sizeLabel} انتخاب کنید تا به صورت محلی ذخیره شود.`,
+      backgroundImageFallbackName: "تصویر پس زمینه",
+      browserPersistError: "این مرورگر نتوانست تصویر پس زمینه گفتگو را به صورت محلی نگه دارد.",
+      imageLoadFailed: "بارگذاری تصویر انتخاب شده انجام نشد.",
+      codexTitle: "Codex App Server",
+      codexDescription:
+        "این بازنویسی ها روی نشست های جدید اعمال می شوند و به شما اجازه می دهند از نصب غیرپیش فرض Codex استفاده کنید.",
+      codexBinaryPath: "مسیر باینری Codex",
+      leaveBlankCodex: "برای استفاده از codex از PATH این کادر را خالی بگذارید.",
+      codexHomePath: "مسیر CODEX_HOME",
+      codexHomeDescription: "شاخه خانگی/پیکربندی سفارشی Codex (اختیاری).",
+      binarySource: "منبع باینری",
+      resetCodexOverrides: "بازنشانی بازنویسی های Codex",
+      openRouterTitle: "OpenRouter",
+      openRouterDescription:
+        "CUT3، OpenRouter را به صورت یک بخش مستقل در رابط نشان می دهد و این نشست ها را از پشت صحنه از طریق Codex اجرا می کند؛ بنابراین می توانید از openrouter/free یا مدل های ذخیره شده :free بدون تغییر پیکربندی عادی Codex استفاده کنید.",
+      openRouterApiKey: "کلید API OpenRouter",
+      openRouterKeyDescription: (electron: boolean) =>
+        electron
+          ? "فقط برای مدل های Codex که از OpenRouter عبور می کنند لازم است. CUT3 آن را در نشست دسکتاپ نگه می دارد و در صورت وجود ذخیره سازی امن، در مخزن اعتبار سیستم عامل ذخیره می کند. برای مجموعه مدل های رایگان فعلی از openrouter/free استفاده کنید یا در ادامه اسلاگ های :free مشخص را اضافه کنید."
+          : "فقط برای مدل های Codex که از OpenRouter عبور می کنند لازم است. CUT3 آن را فقط در حافظه نشست فعلی مرورگر نگه می دارد. برای مجموعه مدل های رایگان فعلی از openrouter/free استفاده کنید یا در ادامه اسلاگ های :free مشخص را اضافه کنید.",
+      openRouterConfigured: "کلید OpenRouter برای نشست های جدید Codex تنظیم شده است.",
+      openRouterMissing: "برای استفاده از مدل های Codex مبتنی بر OpenRouter یک کلید اضافه کنید.",
+      resetOpenRouterKey: "بازنشانی کلید OpenRouter",
+      copilotTitle: "GitHub Copilot CLI",
+      copilotDescription:
+        "این بازنویسی روی نشست های جدید Copilot اعمال می شود و به شما اجازه می دهد از نصب غیرپیش فرض copilot استفاده کنید.",
+      copilotBinaryPath: "مسیر باینری Copilot",
+      leaveBlankCopilot: "برای استفاده از copilot از PATH این کادر را خالی بگذارید.",
+      resetCopilotOverrides: "بازنشانی بازنویسی های Copilot",
+      kimiTitle: "Kimi Code CLI",
+      kimiDescription:
+        "این بازنویسی ها روی نشست های جدید Kimi Code اعمال می شوند. با دستور curl -LsSf https://code.kimi.com/install.sh | bash نصب کنید و یک کلید API Kimi Code اضافه کنید تا CUT3 بتواند نشست های Kimi را مستقیم اجرا کند.",
+      kimiBinaryPath: "مسیر باینری Kimi",
+      leaveBlankKimi: "برای استفاده از kimi از PATH این کادر را خالی بگذارید.",
+      kimiApiKey: "کلید API Kimi",
+      kimiApiDescription: (electron: boolean) =>
+        electron
+          ? "آن را از Kimi Code Console بسازید. CUT3 آن را در نشست دسکتاپ نگه می دارد و در صورت وجود ذخیره سازی امن، در مخزن اعتبار سیستم عامل ذخیره می کند. فقط هنگام شروع نشست های جدید Kimi CLI استفاده می شود."
+          : "آن را از Kimi Code Console بسازید. CUT3 آن را فقط در حافظه نشست فعلی مرورگر نگه می دارد. فقط هنگام شروع نشست های جدید Kimi CLI استفاده می شود.",
+      resetKimiOverrides: "بازنشانی بازنویسی های Kimi",
+      modelsTitle: "مدل ها",
+      modelsDescription:
+        "اسلاگ های مدل اضافی را ذخیره کنید تا در انتخابگر مدل گفتگو و پیشنهادهای دستور /model دیده شوند. مدل های رایگان OpenRouter اکنون بخش مستقل خودشان را دارند.",
+      defaultServiceTier: "رده سرویس پیش فرض",
+      serviceTierOptions: {
+        auto: {
+          label: "خودکار",
+          description: "از پیش فرض های Codex بدون اجبار رده سرویس استفاده می کند.",
+        },
+        fast: {
+          label: "سریع",
+          description: "در صورت پشتیبانی مدل، رده سرویس سریع را درخواست می کند.",
+        },
+        flex: {
+          label: "فلکس",
+          description: "در صورت پشتیبانی مدل، رده سرویس فلکس را درخواست می کند.",
+        },
+      },
+      openRouterFreeModelsTitle: "مدل های رایگان OpenRouter",
+      openRouterFreeModelsDescription: (routerSlug: string) =>
+        `CUT3 کاتالوگ زنده OpenRouter را بررسی می کند و مدل هایی را نشان می دهد که همین حالا رایگان هستند. روتر داخلی ${routerSlug} همیشه در دسترس است و می توانید هر مدل رایگان زنده را ذخیره کنید تا در انتخابگر و پیشنهادهای /model ظاهر شود.`,
+      refreshList: "نوسازی فهرست",
+      openRouterChecking: "در حال بررسی OpenRouter برای فهرست فعلی مدل های رایگان...",
+      openRouterAvailable: (count: number) =>
+        `${count} مدل رایگان زنده OpenRouter در حال حاضر با مسیر بومی ابزار CUT3 سازگار ${count === 1 ? "است" : "هستند"}، به علاوه روتر داخلی.`,
+      openRouterUnavailable: "کشف زنده مدل های رایگان OpenRouter در حال حاضر در دسترس نیست.",
+      openRouterFilteringNote: (routerSlug: string) =>
+        `CUT3 فقط انتخاب هایی را نشان می دهد که روی :free یا ${routerSlug} قفل شده باشند و از ابزارها پشتیبانی کنند.`,
+      lastCheckedAt: (label: string) => `آخرین بررسی در ${label}.`,
+      builtIn: "داخلی",
+      saved: "ذخیره شده",
+      addToPicker: "افزودن به انتخابگر",
+      additionalCodexModelSlug: "اسلاگ مدل اضافی Codex یا OpenRouter",
+      additionalCodexModelHelp:
+        "یک شناسه مدل سفارشی Codex ذخیره کنید، یا اگر می خواهید آن را دستی سنجاق کنید یک اسلاگ :free فعلی OpenRouter را که tools و tool_choice را اعلام می کند وارد کنید.",
+      addModel: "افزودن مدل",
+      savedCodexOpenRouterCount: (count: number) =>
+        `شناسه های ذخیره شده Codex/OpenRouter: ${count}`,
+      resetSavedCodexOpenRouter: "بازنشانی مدل های ذخیره شده Codex/OpenRouter",
+      noSavedCodexOpenRouter: "هنوز هیچ شناسه Codex/OpenRouter ذخیره نشده است.",
+      customModelSlug: "اسلاگ مدل سفارشی",
+      example: "نمونه",
+      savedCustomModels: (count: number) => `مدل های سفارشی ذخیره شده: ${count}`,
+      resetCustomModels: "بازنشانی مدل های سفارشی",
+      noCustomModels: "هنوز هیچ مدل سفارشی ذخیره نشده است.",
+      remove: "حذف",
+      providerCards: {
+        copilot: {
+          title: "GitHub Copilot",
+          description: "اسلاگ های مدل اضافی Copilot را برای انتخابگر و دستور /model ذخیره کنید.",
+        },
+        kimi: {
+          title: "Kimi Code",
+          description: "شناسه های مدل اضافی Kimi Code را برای انتخابگر و دستور /model ذخیره کنید.",
+        },
+      },
+      threadsTitle: "رشته ها",
+      threadsDescription: "حالت فضای کاری پیش فرض برای رشته های پیش نویس جدید را انتخاب کنید.",
+      defaultToNewWorktree: "پیش فرض روی New worktree",
+      defaultToNewWorktreeDescription:
+        "رشته های جدید به جای Local در حالت New worktree شروع می شوند.",
+      restoreDefault: "بازگردانی پیش فرض",
+      responsesTitle: "پاسخ ها",
+      responsesDescription: "مشخص کنید خروجی دستیار هنگام اجرا چگونه نمایش داده شود.",
+      streamAssistantMessages: "پخش زنده پیام های دستیار",
+      streamAssistantMessagesDescription:
+        "وقتی پاسخ در حال تولید است، خروجی را به صورت توکن به توکن نشان می دهد.",
+      keybindingsTitle: "کلیدهای میانبر",
+      keybindingsDescription:
+        "برای ویرایش مستقیم میانبرهای پیشرفته، فایل keybindings.json ذخیره شده را باز کنید.",
+      configFilePath: "مسیر فایل پیکربندی",
+      resolvingKeybindingsPath: "در حال پیدا کردن مسیر keybindings...",
+      opening: "در حال باز کردن...",
+      openKeybindings: "باز کردن keybindings.json",
+      opensInPreferredEditor: "در ویرایشگر ترجیحی شما باز می شود.",
+      safetyTitle: "ایمنی",
+      safetyDescription: "محافظت های اضافی برای اقدامات مخرب محلی.",
+      confirmThreadDeletion: "تایید حذف رشته",
+      confirmThreadDeletionDescription: "پیش از حذف رشته و تاریخچه گفتگوی آن تایید بگیرید.",
+      aboutTitle: "درباره",
+      aboutDescription: "اطلاعات نسخه و محیط برنامه.",
+      version: "نسخه",
+      versionDescription: "نسخه فعلی برنامه.",
+      enterModelSlug: "یک اسلاگ مدل وارد کنید.",
+      modelAlreadyBuiltIn: "این مدل از قبل داخلی است.",
+      modelTooLong: (maxLength: number) => `اسلاگ مدل باید حداکثر ${maxLength} کاراکتر باشد.`,
+      customModelAlreadySaved: "این مدل سفارشی قبلا ذخیره شده است.",
+      openRouterMustBeFree:
+        "شناسه های مدل OpenRouter باید از openrouter/free یا یک اسلاگ صریح :free استفاده کنند تا CUT3 ناخواسته به مدل پولی منتقل نشود.",
+      openRouterNotInCatalog:
+        "این مدل OpenRouter در کاتالوگ زنده فعلی رایگان وجود ندارد. فهرست را نوسازی کنید و یک مدل :free فعلی انتخاب کنید.",
+      openRouterNeedsTools:
+        "CUT3 به مدل های OpenRouter نیاز دارد که هم tools و هم tool_choice را اعلام کنند. یک مدل رایگان دیگر انتخاب کنید یا از openrouter/free استفاده کنید.",
+      noEditorsFound: "هیچ ویرایشگری در دسترس نیست.",
+      openKeybindingsFailed: "باز کردن فایل کلیدهای میانبر ممکن نشد.",
+      openRouterWarningMissingCatalog: "دیگر در کاتالوگ زنده رایگان فعلی OpenRouter دیده نمی شود.",
+      openRouterWarningMissingToolCalling:
+        "پشتیبانی بومی ابزار OpenRouter (`tools` + `tool_choice`) وجود ندارد.",
+    };
+  }
+
+  return {
+    settingsLabel: "Settings",
+    settingsDescription: "Configure app-level preferences for this device.",
+    chatBackgroundTitle: "Chat background",
+    chatBackgroundDescription: "Add a custom image behind the chat timeline on this device.",
+    status: "Status",
+    customImageActive: "Custom image active",
+    defaultBackground: "Default background",
+    file: "File",
+    none: "None",
+    fade: "Fade",
+    blur: "Blur",
+    changeBackground: "Change background",
+    addBackground: "Add background",
+    removeBackground: "Remove background",
+    fadeDescription:
+      "Lower values reveal more of the image. Higher values fade it into the chat surface.",
+    blurDescription: "Increase blur to soften detailed wallpapers behind message content.",
+    resetImageEffects: "Reset image effects",
+    imageStorageNote: (sizeLabel: string) =>
+      `CUT3 stores this image in local app settings on this device. Keep it at or under ${sizeLabel}.`,
+    chooseImageFile: "Choose an image file.",
+    imageTooLarge: (sizeLabel: string) =>
+      `Choose an image up to ${sizeLabel} so it can be saved locally.`,
+    backgroundImageFallbackName: "background image",
+    browserPersistError: "This browser could not persist the chat background image locally.",
+    imageLoadFailed: "Failed to load the selected image.",
+    codexTitle: "Codex App Server",
+    codexDescription:
+      "These overrides apply to new sessions and let you use a non-default Codex install.",
+    codexBinaryPath: "Codex binary path",
+    leaveBlankCodex: "Leave blank to use codex from your PATH.",
+    codexHomePath: "CODEX_HOME path",
+    codexHomeDescription: "Optional custom Codex home/config directory.",
+    binarySource: "Binary source",
+    resetCodexOverrides: "Reset codex overrides",
+    openRouterTitle: "OpenRouter",
+    openRouterDescription:
+      "CUT3 exposes OpenRouter as its own top-level UI section and routes those sessions through Codex under the hood, so you can use the built-in openrouter/free router or saved OpenRouter :free model ids without editing your normal Codex config.",
+    openRouterApiKey: "OpenRouter API key",
+    openRouterKeyDescription: (electron: boolean) =>
+      electron
+        ? "Needed only for Codex models routed through OpenRouter. CUT3 keeps it in the desktop session and persists it in your OS credential store when secure storage is available. Use openrouter/free for the current free-model pool, or add specific :free slugs below."
+        : "Needed only for Codex models routed through OpenRouter. CUT3 keeps it only in memory for the current browser session. Use openrouter/free for the current free-model pool, or add specific :free slugs below.",
+    openRouterConfigured: "OpenRouter key is configured for new Codex sessions.",
+    openRouterMissing: "Add a key to use OpenRouter-routed Codex models.",
+    resetOpenRouterKey: "Reset OpenRouter key",
+    copilotTitle: "GitHub Copilot CLI",
+    copilotDescription:
+      "This override applies to new Copilot sessions and lets you use a non-default copilot install.",
+    copilotBinaryPath: "Copilot binary path",
+    leaveBlankCopilot: "Leave blank to use copilot from your PATH.",
+    resetCopilotOverrides: "Reset copilot overrides",
+    kimiTitle: "Kimi Code CLI",
+    kimiDescription:
+      "These overrides apply to new Kimi Code sessions. Install with curl -LsSf https://code.kimi.com/install.sh | bash and add a Kimi Code API key to let CUT3 start Kimi sessions directly.",
+    kimiBinaryPath: "Kimi binary path",
+    leaveBlankKimi: "Leave blank to use kimi from your PATH.",
+    kimiApiKey: "Kimi API key",
+    kimiApiDescription: (electron: boolean) =>
+      electron
+        ? "Generate this from the Kimi Code Console. CUT3 keeps it in the desktop session and persists it in your OS credential store when secure storage is available. It is only used when starting new Kimi CLI sessions."
+        : "Generate this from the Kimi Code Console. CUT3 keeps it only in memory for the current browser session. It is only used when starting new Kimi CLI sessions.",
+    resetKimiOverrides: "Reset kimi overrides",
+    modelsTitle: "Models",
+    modelsDescription:
+      "Save additional provider model slugs so they appear in the chat model picker and /model command suggestions. OpenRouter free models now have their own section, while the cards below handle additional provider-specific custom models.",
+    defaultServiceTier: "Default service tier",
+    serviceTierOptions: {
+      auto: {
+        label: "Automatic",
+        description: "Use Codex defaults without forcing a service tier.",
+      },
+      fast: {
+        label: "Fast",
+        description: "Request the fast service tier when the model supports it.",
+      },
+      flex: {
+        label: "Flex",
+        description: "Request the flex service tier when the model supports it.",
+      },
+    },
+    openRouterFreeModelsTitle: "OpenRouter Free Models",
+    openRouterFreeModelsDescription: (routerSlug: string) =>
+      `CUT3 checks OpenRouter's live catalog and lists the models that are free right now. The built-in ${routerSlug} router is always available, and you can save any live free model below so it shows up in the picker and /model suggestions.`,
+    refreshList: "Refresh list",
+    openRouterChecking: "Checking OpenRouter for the current free-model list...",
+    openRouterAvailable: (count: number) =>
+      `${count} live OpenRouter free model${count === 1 ? " is" : "s are"} currently compatible with CUT3's native tool-calling path, plus the built-in router.`,
+    openRouterUnavailable: "Live OpenRouter free-model discovery is currently unavailable.",
+    openRouterFilteringNote: (routerSlug: string) =>
+      `CUT3 only lists OpenRouter picks that are locked to :free or ${routerSlug} and advertise tool use.`,
+    lastCheckedAt: (label: string) => `Last checked at ${label}.`,
+    builtIn: "Built in",
+    saved: "Saved",
+    addToPicker: "Add to picker",
+    additionalCodexModelSlug: "Additional Codex or OpenRouter model slug",
+    additionalCodexModelHelp:
+      "Save a custom Codex model id, or paste a currently listed OpenRouter :free slug that advertises tools and tool_choice if you want to pin it manually.",
+    addModel: "Add model",
+    savedCodexOpenRouterCount: (count: number) => `Saved Codex/OpenRouter model ids: ${count}`,
+    resetSavedCodexOpenRouter: "Reset saved Codex/OpenRouter models",
+    noSavedCodexOpenRouter: "No saved Codex/OpenRouter model ids yet.",
+    customModelSlug: "Custom model slug",
+    example: "Example",
+    savedCustomModels: (count: number) => `Saved custom models: ${count}`,
+    resetCustomModels: "Reset custom models",
+    noCustomModels: "No custom models saved yet.",
+    remove: "Remove",
+    providerCards: {
+      copilot: {
+        title: "GitHub Copilot",
+        description: "Save additional Copilot model slugs for the picker and /model command.",
+      },
+      kimi: {
+        title: "Kimi Code",
+        description: "Save additional Kimi Code model ids for the picker and /model command.",
+      },
+    },
+    threadsTitle: "Threads",
+    threadsDescription: "Choose the default workspace mode for newly created draft threads.",
+    defaultToNewWorktree: "Default to New worktree",
+    defaultToNewWorktreeDescription: "New threads start in New worktree mode instead of Local.",
+    restoreDefault: "Restore default",
+    responsesTitle: "Responses",
+    responsesDescription: "Control how assistant output is rendered during a turn.",
+    streamAssistantMessages: "Stream assistant messages",
+    streamAssistantMessagesDescription:
+      "Show token-by-token output while a response is in progress.",
+    keybindingsTitle: "Keybindings",
+    keybindingsDescription:
+      "Open the persisted keybindings.json file to edit advanced bindings directly.",
+    configFilePath: "Config file path",
+    resolvingKeybindingsPath: "Resolving keybindings path...",
+    opening: "Opening...",
+    openKeybindings: "Open keybindings.json",
+    opensInPreferredEditor: "Opens in your preferred editor selection.",
+    safetyTitle: "Safety",
+    safetyDescription: "Additional guardrails for destructive local actions.",
+    confirmThreadDeletion: "Confirm thread deletion",
+    confirmThreadDeletionDescription:
+      "Ask for confirmation before deleting a thread and its chat history.",
+    aboutTitle: "About",
+    aboutDescription: "Application version and environment information.",
+    version: "Version",
+    versionDescription: "Current version of the application.",
+    enterModelSlug: "Enter a model slug.",
+    modelAlreadyBuiltIn: "That model is already built in.",
+    modelTooLong: (maxLength: number) => `Model slugs must be ${maxLength} characters or less.`,
+    customModelAlreadySaved: "That custom model is already saved.",
+    openRouterMustBeFree:
+      "OpenRouter model ids must use openrouter/free or an explicit :free slug so CUT3 cannot drift onto a billed model.",
+    openRouterNotInCatalog:
+      "That OpenRouter model is not in the current live free catalog. Refresh the list and pick a currently free :free model.",
+    openRouterNeedsTools:
+      "CUT3 requires OpenRouter models that advertise both tools and tool_choice. Pick another listed free model or use openrouter/free.",
+    noEditorsFound: "No available editors found.",
+    openKeybindingsFailed: "Unable to open keybindings file.",
+    openRouterWarningMissingCatalog: "No longer appears in OpenRouter's current live free catalog.",
+    openRouterWarningMissingToolCalling:
+      "Missing OpenRouter native tool-calling support (`tools` + `tool_choice`).",
+  };
+}
 
 const CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL = `${Math.round(
   MAX_CHAT_BACKGROUND_IMAGE_BYTES / (1024 * 1024),
@@ -153,6 +484,9 @@ function renderCapabilityBadge(label: string) {
 
 function SettingsRouteView() {
   const { settings, defaults, updateSettings } = useAppSettings();
+  const copy = useMemo(() => getSettingsCopy(settings.language), [settings.language]);
+  const languageLocale = getAppLanguageDetails(settings.language).locale;
+  const settingsDirection = getAppLanguageDetails(settings.language).dir;
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const openRouterCatalogQuery = useQuery(openRouterFreeModelsQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
@@ -212,18 +546,15 @@ function SettingsRouteView() {
 
           const catalogEntry = openRouterModelsBySlug.get(slug) ?? null;
           if (catalogEntry === null) {
-            return [slug, "No longer appears in OpenRouter's current live free catalog."] as const;
+            return [slug, copy.openRouterWarningMissingCatalog] as const;
           }
           if (!supportsOpenRouterNativeToolCalling(catalogEntry)) {
-            return [
-              slug,
-              "Missing OpenRouter native tool-calling support (`tools` + `tool_choice`).",
-            ] as const;
+            return [slug, copy.openRouterWarningMissingToolCalling] as const;
           }
           return [slug, null] as const;
         }),
       ),
-    [hasLiveOpenRouterCatalog, openRouterModelsBySlug, savedOpenRouterModels],
+    [copy, hasLiveOpenRouterCatalog, openRouterModelsBySlug, savedOpenRouterModels],
   );
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
@@ -248,7 +579,7 @@ function SettingsRouteView() {
     const api = ensureNativeApi();
     const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
     if (!editor) {
-      setOpenKeybindingsError("No available editors found.");
+      setOpenKeybindingsError(copy.noEditorsFound);
       setIsOpeningKeybindings(false);
       return;
     }
@@ -256,13 +587,13 @@ function SettingsRouteView() {
       .openInEditor(keybindingsConfigPath, editor)
       .catch((error) => {
         setOpenKeybindingsError(
-          error instanceof Error ? error.message : "Unable to open keybindings file.",
+          error instanceof Error ? error.message : copy.openKeybindingsFailed,
         );
       })
       .finally(() => {
         setIsOpeningKeybindings(false);
       });
-  }, [availableEditors, keybindingsConfigPath]);
+  }, [availableEditors, copy.noEditorsFound, copy.openKeybindingsFailed, keybindingsConfigPath]);
 
   const saveCustomModel = useCallback(
     (provider: ProviderKind, value: string) => {
@@ -271,28 +602,28 @@ function SettingsRouteView() {
       if (!normalized) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: "Enter a model slug.",
+          [provider]: copy.enterModelSlug,
         }));
         return false;
       }
       if (getModelOptions(provider).some((option) => option.slug === normalized)) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: "That model is already built in.",
+          [provider]: copy.modelAlreadyBuiltIn,
         }));
         return false;
       }
       if (normalized.length > MAX_CUSTOM_MODEL_LENGTH) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: `Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`,
+          [provider]: copy.modelTooLong(MAX_CUSTOM_MODEL_LENGTH),
         }));
         return false;
       }
       if (customModels.includes(normalized)) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: "That custom model is already saved.",
+          [provider]: copy.customModelAlreadySaved,
         }));
         return false;
       }
@@ -301,8 +632,7 @@ function SettingsRouteView() {
         if (!isOpenRouterGuaranteedFreeSlug(normalized)) {
           setCustomModelErrorByProvider((existing) => ({
             ...existing,
-            codex:
-              "OpenRouter model ids must use `openrouter/free` or an explicit `:free` slug so CUT3 cannot drift onto a billed model.",
+            codex: copy.openRouterMustBeFree,
           }));
           return false;
         }
@@ -312,16 +642,14 @@ function SettingsRouteView() {
           if (normalized !== OPENROUTER_FREE_ROUTER_MODEL && catalogEntry === null) {
             setCustomModelErrorByProvider((existing) => ({
               ...existing,
-              codex:
-                "That OpenRouter model is not in the current live free catalog. Refresh the list and pick a currently free `:free` model.",
+              codex: copy.openRouterNotInCatalog,
             }));
             return false;
           }
           if (catalogEntry && !supportsOpenRouterNativeToolCalling(catalogEntry)) {
             setCustomModelErrorByProvider((existing) => ({
               ...existing,
-              codex:
-                "CUT3 requires OpenRouter models that advertise both `tools` and `tool_choice`. Pick another listed free model or use `openrouter/free`.",
+              codex: copy.openRouterNeedsTools,
             }));
             return false;
           }
@@ -335,7 +663,7 @@ function SettingsRouteView() {
       }));
       return true;
     },
-    [hasLiveOpenRouterCatalog, openRouterModelsBySlug, settings, updateSettings],
+    [copy, hasLiveOpenRouterCatalog, openRouterModelsBySlug, settings, updateSettings],
   );
 
   const addCustomModel = useCallback(
@@ -371,14 +699,18 @@ function SettingsRouteView() {
   }, [defaults, updateSettings]);
 
   const lastCheckedOpenRouterCatalogLabel = openRouterCatalogQuery.data
-    ? new Date(openRouterCatalogQuery.data.fetchedAt).toLocaleTimeString()
+    ? new Intl.DateTimeFormat(languageLocale, {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      }).format(new Date(openRouterCatalogQuery.data.fetchedAt))
     : null;
 
   const openRouterCatalogStatusMessage = openRouterCatalogQuery.isPending
-    ? "Checking OpenRouter for the current free-model list..."
+    ? copy.openRouterChecking
     : hasLiveOpenRouterCatalog
-      ? `${openRouterCatalogModelCount} live OpenRouter free model${openRouterCatalogModelCount === 1 ? " is" : "s are"} currently compatible with CUT3's native tool-calling path, plus the built-in router.`
-      : "Live OpenRouter free-model discovery is currently unavailable.";
+      ? copy.openRouterAvailable(openRouterCatalogModelCount)
+      : copy.openRouterUnavailable;
 
   const openRouterCatalogError =
     openRouterCatalogQuery.data?.status === "unavailable"
@@ -387,22 +719,24 @@ function SettingsRouteView() {
 
   const renderCustomModelsCard = (providerSettings: (typeof MODEL_PROVIDER_SETTINGS)[number]) => {
     const provider = providerSettings.provider;
+    const providerCopy = copy.providerCards[provider];
     const customModels = getCustomModelsForProvider(settings, provider);
     const customModelInput = customModelInputByProvider[provider];
     const customModelError = customModelErrorByProvider[provider] ?? null;
     return (
       <div key={provider} className="rounded-xl border border-border bg-background/50 p-4">
         <div className="mb-4">
-          <h3 className="text-sm font-medium text-foreground">{providerSettings.title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{providerSettings.description}</p>
+          <h3 className="text-sm font-medium text-foreground">{providerCopy.title}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{providerCopy.description}</p>
         </div>
 
         <div className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
             <label htmlFor={`custom-model-slug-${provider}`} className="block flex-1 space-y-1">
-              <span className="text-xs font-medium text-foreground">Custom model slug</span>
+              <span className="text-xs font-medium text-foreground">{copy.customModelSlug}</span>
               <Input
                 id={`custom-model-slug-${provider}`}
+                dir="ltr"
                 value={customModelInput}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -426,12 +760,12 @@ function SettingsRouteView() {
                 spellCheck={false}
               />
               <span className="text-xs text-muted-foreground">
-                Example: <code>{providerSettings.example}</code>
+                {copy.example}: <code>{providerSettings.example}</code>
               </span>
             </label>
 
             <Button className="sm:mt-6" type="button" onClick={() => addCustomModel(provider)}>
-              Add model
+              {copy.addModel}
             </Button>
           </div>
 
@@ -439,7 +773,7 @@ function SettingsRouteView() {
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <p>Saved custom models: {customModels.length}</p>
+              <p>{copy.savedCustomModels(customModels.length)}</p>
               {customModels.length > 0 ? (
                 <Button
                   size="xs"
@@ -452,7 +786,7 @@ function SettingsRouteView() {
                     )
                   }
                 >
-                  Reset custom models
+                  {copy.resetCustomModels}
                 </Button>
               ) : null}
             </div>
@@ -465,9 +799,6 @@ function SettingsRouteView() {
                     className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2"
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-2">
-                      {provider === "codex" && shouldShowFastTierIcon(slug, codexServiceTier) ? (
-                        <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
-                      ) : null}
                       <code className="min-w-0 flex-1 truncate text-xs text-foreground">
                         {slug}
                       </code>
@@ -477,14 +808,14 @@ function SettingsRouteView() {
                       variant="ghost"
                       onClick={() => removeCustomModel(provider, slug)}
                     >
-                      Remove
+                      {copy.remove}
                     </Button>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-xs text-muted-foreground">
-                No custom models saved yet.
+                {copy.noCustomModels}
               </div>
             )}
           </div>
@@ -546,14 +877,12 @@ function SettingsRouteView() {
       }
 
       if (!file.type.startsWith("image/")) {
-        setChatBackgroundError("Choose an image file.");
+        setChatBackgroundError(copy.chooseImageFile);
         return;
       }
 
       if (file.size > MAX_CHAT_BACKGROUND_IMAGE_BYTES) {
-        setChatBackgroundError(
-          `Choose an image up to ${CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL} so it can be saved locally.`,
-        );
+        setChatBackgroundError(copy.imageTooLarge(CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL));
         return;
       }
 
@@ -573,27 +902,23 @@ function SettingsRouteView() {
             dataUrlCandidate.length <= MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH
               ? dataUrlCandidate
               : "",
-          chatBackgroundImageName: file.name || "background image",
+          chatBackgroundImageName: file.name || copy.backgroundImageFallbackName,
         });
         if (previousAssetId && previousAssetId !== nextAssetId) {
           void removeChatBackgroundBlob(previousAssetId).catch(() => undefined);
         }
       } catch (error) {
         if (error instanceof Error && error.message.includes("IndexedDB")) {
-          setChatBackgroundError(
-            "This browser could not persist the chat background image locally.",
-          );
+          setChatBackgroundError(copy.browserPersistError);
         }
         if (!(error instanceof Error && error.message.includes("IndexedDB"))) {
-          setChatBackgroundError(
-            error instanceof Error ? error.message : "Failed to load the selected image.",
-          );
+          setChatBackgroundError(error instanceof Error ? error.message : copy.imageLoadFailed);
         }
       } finally {
         setIsUpdatingChatBackground(false);
       }
     },
-    [settings.chatBackgroundImageAssetId, updateSettings],
+    [copy, settings.chatBackgroundImageAssetId, updateSettings],
   );
 
   return (
@@ -604,13 +929,13 @@ function SettingsRouteView() {
             <ThreadSidebarToggle />
             <ThreadNewButton />
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
-              Settings
+              {copy.settingsLabel}
             </span>
           </div>
         )}
 
         <div className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+          <div dir={settingsDirection} className="mx-auto flex w-full max-w-3xl flex-col gap-6">
             <header className="flex items-start gap-3">
               {!isElectron ? (
                 <div className="flex items-center gap-2">
@@ -619,10 +944,10 @@ function SettingsRouteView() {
                 </div>
               ) : null}
               <div className="space-y-1">
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
-                <p className="text-sm text-muted-foreground">
-                  Configure app-level preferences for this device.
-                </p>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                  {copy.settingsLabel}
+                </h1>
+                <p className="text-sm text-muted-foreground">{copy.settingsDescription}</p>
               </div>
             </header>
 
@@ -630,9 +955,9 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Chat background</h2>
+                <h2 className="text-sm font-medium text-foreground">{copy.chatBackgroundTitle}</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Add a custom image behind the chat timeline on this device.
+                  {copy.chatBackgroundDescription}
                 </p>
               </div>
 
@@ -663,25 +988,25 @@ function SettingsRouteView() {
 
                   <div className="border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
                     <p>
-                      Status:{" "}
+                      {copy.status}:{" "}
                       <span className="font-medium text-foreground">
-                        {hasChatBackgroundImage ? "Custom image active" : "Default background"}
+                        {hasChatBackgroundImage ? copy.customImageActive : copy.defaultBackground}
                       </span>
                     </p>
                     <p className="mt-1">
-                      File:{" "}
+                      {copy.file}:{" "}
                       <span className="font-medium text-foreground">
-                        {settings.chatBackgroundImageName || "None"}
+                        {settings.chatBackgroundImageName || copy.none}
                       </span>
                     </p>
                     <p className="mt-1">
-                      Fade:{" "}
+                      {copy.fade}:{" "}
                       <span className="font-medium text-foreground">
                         {chatBackgroundFadePercent}%
                       </span>
                     </p>
                     <p className="mt-1">
-                      Blur:{" "}
+                      {copy.blur}:{" "}
                       <span className="font-medium text-foreground">{chatBackgroundBlurPx}px</span>
                     </p>
                   </div>
@@ -699,7 +1024,7 @@ function SettingsRouteView() {
                     ) : (
                       <ImagePlusIcon className="size-4" />
                     )}
-                    {hasChatBackgroundImage ? "Change background" : "Add background"}
+                    {hasChatBackgroundImage ? copy.changeBackground : copy.addBackground}
                   </Button>
                   <Button
                     type="button"
@@ -708,14 +1033,14 @@ function SettingsRouteView() {
                     disabled={!hasChatBackgroundImageSource || isUpdatingChatBackground}
                   >
                     <Trash2Icon className="size-4" />
-                    Remove background
+                    {copy.removeBackground}
                   </Button>
                 </div>
 
                 <div className="space-y-4 rounded-xl border border-border bg-background/50 px-3 py-3">
                   <label className="block space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs font-medium text-foreground">Fade</span>
+                      <span className="text-xs font-medium text-foreground">{copy.fade}</span>
                       <span className="text-xs text-muted-foreground">
                         {chatBackgroundFadePercent}%
                       </span>
@@ -735,17 +1060,14 @@ function SettingsRouteView() {
                         })
                       }
                       className="w-full accent-primary disabled:cursor-not-allowed disabled:opacity-45"
-                      aria-label="Background fade"
+                      aria-label={copy.fade}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Lower values reveal more of the image. Higher values fade it into the chat
-                      surface.
-                    </p>
+                    <p className="text-xs text-muted-foreground">{copy.fadeDescription}</p>
                   </label>
 
                   <label className="block space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs font-medium text-foreground">Blur</span>
+                      <span className="text-xs font-medium text-foreground">{copy.blur}</span>
                       <span className="text-xs text-muted-foreground">
                         {chatBackgroundBlurPx}px
                       </span>
@@ -765,11 +1087,9 @@ function SettingsRouteView() {
                         })
                       }
                       className="w-full accent-primary disabled:cursor-not-allowed disabled:opacity-45"
-                      aria-label="Background blur"
+                      aria-label={copy.blur}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Increase blur to soften detailed wallpapers behind message content.
-                    </p>
+                    <p className="text-xs text-muted-foreground">{copy.blurDescription}</p>
                   </label>
 
                   {(chatBackgroundFadePercent !== DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT ||
@@ -787,15 +1107,14 @@ function SettingsRouteView() {
                           })
                         }
                       >
-                        Reset image effects
+                        {copy.resetImageEffects}
                       </Button>
                     </div>
                   )}
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  CUT3 stores this image in local app settings on this device. Keep it at or under{" "}
-                  <code>{CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL}</code>.
+                  {copy.imageStorageNote(CHAT_BACKGROUND_IMAGE_SIZE_LIMIT_LABEL)}
                 </p>
                 {chatBackgroundError ? (
                   <p className="text-xs text-destructive">{chatBackgroundError}</p>
@@ -805,44 +1124,42 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Codex App Server</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  These overrides apply to new sessions and let you use a non-default Codex install.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.codexTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.codexDescription}</p>
               </div>
 
               <div className="space-y-4">
                 <label htmlFor="codex-binary-path" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">Codex binary path</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {copy.codexBinaryPath}
+                  </span>
                   <Input
                     id="codex-binary-path"
+                    dir="ltr"
                     value={codexBinaryPath}
                     onChange={(event) => updateSettings({ codexBinaryPath: event.target.value })}
                     placeholder="codex"
                     spellCheck={false}
                   />
-                  <span className="text-xs text-muted-foreground">
-                    Leave blank to use <code>codex</code> from your PATH.
-                  </span>
+                  <span className="text-xs text-muted-foreground">{copy.leaveBlankCodex}</span>
                 </label>
 
                 <label htmlFor="codex-home-path" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">CODEX_HOME path</span>
+                  <span className="text-xs font-medium text-foreground">{copy.codexHomePath}</span>
                   <Input
                     id="codex-home-path"
+                    dir="ltr"
                     value={codexHomePath}
                     onChange={(event) => updateSettings({ codexHomePath: event.target.value })}
                     placeholder="/Users/you/.codex"
                     spellCheck={false}
                   />
-                  <span className="text-xs text-muted-foreground">
-                    Optional custom Codex home/config directory.
-                  </span>
+                  <span className="text-xs text-muted-foreground">{copy.codexHomeDescription}</span>
                 </label>
 
                 <div className="flex flex-col gap-3 text-xs text-muted-foreground sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
-                    <p>Binary source</p>
+                    <p>{copy.binarySource}</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-foreground">
                       {codexBinaryPath || "PATH"}
                     </p>
@@ -858,7 +1175,7 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Reset codex overrides
+                    {copy.resetCodexOverrides}
                   </Button>
                 </div>
               </div>
@@ -866,20 +1183,18 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">OpenRouter</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  CUT3 exposes OpenRouter as its own top-level UI section and routes those sessions
-                  through Codex under the hood, so you can use the built-in{" "}
-                  <code>openrouter/free</code> router or saved OpenRouter <code>:free</code> model
-                  ids without editing your normal Codex config.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.openRouterTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.openRouterDescription}</p>
               </div>
 
               <div className="space-y-4">
                 <label htmlFor="openrouter-api-key" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">OpenRouter API key</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {copy.openRouterApiKey}
+                  </span>
                   <Input
                     id="openrouter-api-key"
+                    dir="ltr"
                     type="password"
                     value={openRouterApiKey}
                     onChange={(event) => updateSettings({ openRouterApiKey: event.target.value })}
@@ -888,20 +1203,15 @@ function SettingsRouteView() {
                     spellCheck={false}
                   />
                   <span className="text-xs text-muted-foreground">
-                    Needed only for Codex models routed through OpenRouter.{" "}
-                    {isElectron
-                      ? "CUT3 keeps it in the desktop session and persists it in your OS credential store when secure storage is available."
-                      : "CUT3 keeps it only in memory for the current browser session."}{" "}
-                    Use <code>openrouter/free</code> for the current free-model pool, or add
-                    specific <code>:free</code> slugs below.
+                    {copy.openRouterKeyDescription(isElectron)}
                   </span>
                 </label>
 
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <p>
                     {openRouterApiKey.trim().length > 0
-                      ? "OpenRouter key is configured for new Codex sessions."
-                      : "Add a key to use OpenRouter-routed Codex models."}
+                      ? copy.openRouterConfigured
+                      : copy.openRouterMissing}
                   </p>
                   <Button
                     size="xs"
@@ -912,7 +1222,7 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Reset OpenRouter key
+                    {copy.resetOpenRouterKey}
                   </Button>
                 </div>
               </div>
@@ -920,26 +1230,24 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">GitHub Copilot CLI</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  This override applies to new Copilot sessions and lets you use a non-default
-                  <code> copilot</code> install.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.copilotTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.copilotDescription}</p>
               </div>
 
               <div className="space-y-4">
                 <label htmlFor="copilot-binary-path" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">Copilot binary path</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {copy.copilotBinaryPath}
+                  </span>
                   <Input
                     id="copilot-binary-path"
+                    dir="ltr"
                     value={copilotBinaryPath}
                     onChange={(event) => updateSettings({ copilotBinaryPath: event.target.value })}
                     placeholder="copilot"
                     spellCheck={false}
                   />
-                  <span className="text-xs text-muted-foreground">
-                    Leave blank to use <code>copilot</code> from your PATH.
-                  </span>
+                  <span className="text-xs text-muted-foreground">{copy.leaveBlankCopilot}</span>
                 </label>
 
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -958,7 +1266,7 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Reset copilot overrides
+                    {copy.resetCopilotOverrides}
                   </Button>
                 </div>
               </div>
@@ -966,33 +1274,29 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Kimi Code CLI</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  These overrides apply to new Kimi Code sessions. Install with{" "}
-                  <code>curl -LsSf https://code.kimi.com/install.sh | bash</code> and add a Kimi
-                  Code API key to let CUT3 start Kimi sessions directly.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.kimiTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.kimiDescription}</p>
               </div>
 
               <div className="space-y-4">
                 <label htmlFor="kimi-binary-path" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">Kimi binary path</span>
+                  <span className="text-xs font-medium text-foreground">{copy.kimiBinaryPath}</span>
                   <Input
                     id="kimi-binary-path"
+                    dir="ltr"
                     value={kimiBinaryPath}
                     onChange={(event) => updateSettings({ kimiBinaryPath: event.target.value })}
                     placeholder="kimi"
                     spellCheck={false}
                   />
-                  <span className="text-xs text-muted-foreground">
-                    Leave blank to use <code>kimi</code> from your PATH.
-                  </span>
+                  <span className="text-xs text-muted-foreground">{copy.leaveBlankKimi}</span>
                 </label>
 
                 <label htmlFor="kimi-api-key" className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">Kimi API key</span>
+                  <span className="text-xs font-medium text-foreground">{copy.kimiApiKey}</span>
                   <Input
                     id="kimi-api-key"
+                    dir="ltr"
                     type="password"
                     value={kimiApiKey}
                     onChange={(event) => updateSettings({ kimiApiKey: event.target.value })}
@@ -1001,11 +1305,7 @@ function SettingsRouteView() {
                     spellCheck={false}
                   />
                   <span className="text-xs text-muted-foreground">
-                    Generate this from the Kimi Code Console.{" "}
-                    {isElectron
-                      ? "CUT3 keeps it in the desktop session and persists it in your OS credential store when secure storage is available."
-                      : "CUT3 keeps it only in memory for the current browser session."}{" "}
-                    It is only used when starting new Kimi CLI sessions.
+                    {copy.kimiApiDescription(isElectron)}
                   </span>
                 </label>
 
@@ -1024,7 +1324,7 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Reset kimi overrides
+                    {copy.resetKimiOverrides}
                   </Button>
                 </div>
               </div>
@@ -1032,20 +1332,18 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Models</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Save additional provider model slugs so they appear in the chat model picker and
-                  `/model` command suggestions. OpenRouter free models now have their own section,
-                  while the cards below handle additional provider-specific custom models.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.modelsTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.modelsDescription}</p>
               </div>
 
               <div className="space-y-5">
                 <label className="block space-y-1">
-                  <span className="text-xs font-medium text-foreground">Default service tier</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {copy.defaultServiceTier}
+                  </span>
                   <Select
                     items={APP_SERVICE_TIER_OPTIONS.map((option) => ({
-                      label: option.label,
+                      label: copy.serviceTierOptions[option.value].label,
                       value: option.value,
                     }))}
                     value={codexServiceTier}
@@ -1066,15 +1364,16 @@ function SettingsRouteView() {
                             ) : (
                               <span className="size-3.5 shrink-0" aria-hidden="true" />
                             )}
-                            <span className="truncate">{option.label}</span>
+                            <span className="truncate">
+                              {copy.serviceTierOptions[option.value].label}
+                            </span>
                           </div>
                         </SelectItem>
                       ))}
                     </SelectPopup>
                   </Select>
                   <span className="text-xs text-muted-foreground">
-                    {APP_SERVICE_TIER_OPTIONS.find((option) => option.value === codexServiceTier)
-                      ?.description ?? "Use Codex defaults without forcing a service tier."}
+                    {copy.serviceTierOptions[codexServiceTier].description}
                   </span>
                 </label>
 
@@ -1082,13 +1381,10 @@ function SettingsRouteView() {
                   <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <h3 className="text-sm font-medium text-foreground">
-                        OpenRouter Free Models
+                        {copy.openRouterFreeModelsTitle}
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        CUT3 checks OpenRouter&apos;s live catalog and lists the models that are
-                        free right now. The built-in <code>{OPENROUTER_FREE_ROUTER_MODEL}</code>{" "}
-                        router is always available, and you can save any live free model below so it
-                        shows up in the picker and <code>/model</code> suggestions.
+                        {copy.openRouterFreeModelsDescription(OPENROUTER_FREE_ROUTER_MODEL)}
                       </p>
                     </div>
                     <Button
@@ -1102,7 +1398,7 @@ function SettingsRouteView() {
                       ) : (
                         <RefreshCwIcon className="size-3.5" />
                       )}
-                      Refresh list
+                      {copy.refreshList}
                     </Button>
                   </div>
 
@@ -1111,12 +1407,13 @@ function SettingsRouteView() {
                       <p>{openRouterCatalogStatusMessage}</p>
                       {openRouterCatalogQuery.data?.status === "available" ? (
                         <p className="mt-1">
-                          CUT3 only lists OpenRouter picks that are locked to <code>:free</code> or{" "}
-                          <code>{OPENROUTER_FREE_ROUTER_MODEL}</code> and advertise tool use.
+                          {copy.openRouterFilteringNote(OPENROUTER_FREE_ROUTER_MODEL)}
                         </p>
                       ) : null}
                       {lastCheckedOpenRouterCatalogLabel ? (
-                        <p className="mt-1">Last checked at {lastCheckedOpenRouterCatalogLabel}.</p>
+                        <p className="mt-1">
+                          {copy.lastCheckedAt(lastCheckedOpenRouterCatalogLabel)}
+                        </p>
                       ) : null}
                       {openRouterCatalogError ? (
                         <p className="mt-2 text-destructive">{openRouterCatalogError}</p>
@@ -1165,7 +1462,7 @@ function SettingsRouteView() {
                               disabled={isBuiltIn || isSaved}
                               onClick={() => addOpenRouterCatalogModel(model.slug)}
                             >
-                              {isBuiltIn ? "Built in" : isSaved ? "Saved" : "Add to picker"}
+                              {isBuiltIn ? copy.builtIn : isSaved ? copy.saved : copy.addToPicker}
                             </Button>
                           </div>
                         );
@@ -1178,10 +1475,11 @@ function SettingsRouteView() {
                         className="block flex-1 space-y-1"
                       >
                         <span className="text-xs font-medium text-foreground">
-                          Additional Codex or OpenRouter model slug
+                          {copy.additionalCodexModelSlug}
                         </span>
                         <Input
                           id="custom-model-slug-openrouter"
+                          dir="ltr"
                           value={openRouterCustomModelInput}
                           onChange={(event) => {
                             const value = event.target.value;
@@ -1205,9 +1503,7 @@ function SettingsRouteView() {
                           spellCheck={false}
                         />
                         <span className="text-xs text-muted-foreground">
-                          Save a custom Codex model id, or paste a currently listed OpenRouter{" "}
-                          <code>:free</code> slug that advertises <code>tools</code> and{" "}
-                          <code>tool_choice</code> if you want to pin it manually.
+                          {copy.additionalCodexModelHelp}
                         </span>
                       </label>
 
@@ -1216,7 +1512,7 @@ function SettingsRouteView() {
                         type="button"
                         onClick={() => addCustomModel("codex")}
                       >
-                        Add model
+                        {copy.addModel}
                       </Button>
                     </div>
 
@@ -1226,10 +1522,10 @@ function SettingsRouteView() {
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                        <p>Saved Codex/OpenRouter model ids: {savedOpenRouterModels.length}</p>
+                        <p>{copy.savedCodexOpenRouterCount(savedOpenRouterModels.length)}</p>
                         {savedOpenRouterModels.length > 0 ? (
                           <Button size="xs" variant="outline" onClick={resetOpenRouterCustomModels}>
-                            Reset saved Codex/OpenRouter models
+                            {copy.resetSavedCodexOpenRouter}
                           </Button>
                         ) : null}
                       </div>
@@ -1256,7 +1552,7 @@ function SettingsRouteView() {
                                   variant="ghost"
                                   onClick={() => removeCustomModel("codex", slug)}
                                 >
-                                  Remove
+                                  {copy.remove}
                                 </Button>
                               </div>
                             );
@@ -1264,7 +1560,7 @@ function SettingsRouteView() {
                         </div>
                       ) : (
                         <div className="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-xs text-muted-foreground">
-                          No saved Codex/OpenRouter model ids yet.
+                          {copy.noSavedCodexOpenRouter}
                         </div>
                       )}
                     </div>
@@ -1277,17 +1573,15 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Threads</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Choose the default workspace mode for newly created draft threads.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.threadsTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.threadsDescription}</p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Default to New worktree</p>
+                  <p className="text-sm font-medium text-foreground">{copy.defaultToNewWorktree}</p>
                   <p className="text-xs text-muted-foreground">
-                    New threads start in New worktree mode instead of Local.
+                    {copy.defaultToNewWorktreeDescription}
                   </p>
                 </div>
                 <Switch
@@ -1297,7 +1591,7 @@ function SettingsRouteView() {
                       defaultThreadEnvMode: checked ? "worktree" : "local",
                     })
                   }
-                  aria-label="Default new threads to New worktree mode"
+                  aria-label={copy.defaultToNewWorktree}
                 />
               </div>
 
@@ -1312,7 +1606,7 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Restore default
+                    {copy.restoreDefault}
                   </Button>
                 </div>
               ) : null}
@@ -1320,17 +1614,17 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Responses</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Control how assistant output is rendered during a turn.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.responsesTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.responsesDescription}</p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Stream assistant messages</p>
+                  <p className="text-sm font-medium text-foreground">
+                    {copy.streamAssistantMessages}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Show token-by-token output while a response is in progress.
+                    {copy.streamAssistantMessagesDescription}
                   </p>
                 </div>
                 <Switch
@@ -1340,7 +1634,7 @@ function SettingsRouteView() {
                       enableAssistantStreaming: Boolean(checked),
                     })
                   }
-                  aria-label="Stream assistant messages"
+                  aria-label={copy.streamAssistantMessages}
                 />
               </div>
 
@@ -1355,7 +1649,7 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Restore default
+                    {copy.restoreDefault}
                   </Button>
                 </div>
               ) : null}
@@ -1363,19 +1657,16 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Keybindings</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Open the persisted <code>keybindings.json</code> file to edit advanced bindings
-                  directly.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.keybindingsTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.keybindingsDescription}</p>
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground">Config file path</p>
+                    <p className="text-xs font-medium text-foreground">{copy.configFilePath}</p>
                     <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
-                      {keybindingsConfigPath ?? "Resolving keybindings path..."}
+                      {keybindingsConfigPath ?? copy.resolvingKeybindingsPath}
                     </p>
                   </div>
                   <Button
@@ -1384,13 +1675,11 @@ function SettingsRouteView() {
                     disabled={!keybindingsConfigPath || isOpeningKeybindings}
                     onClick={openKeybindingsFile}
                   >
-                    {isOpeningKeybindings ? "Opening..." : "Open keybindings.json"}
+                    {isOpeningKeybindings ? copy.opening : copy.openKeybindings}
                   </Button>
                 </div>
 
-                <p className="text-xs text-muted-foreground">
-                  Opens in your preferred editor selection.
-                </p>
+                <p className="text-xs text-muted-foreground">{copy.opensInPreferredEditor}</p>
                 {openKeybindingsError ? (
                   <p className="text-xs text-destructive">{openKeybindingsError}</p>
                 ) : null}
@@ -1399,17 +1688,17 @@ function SettingsRouteView() {
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">Safety</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Additional guardrails for destructive local actions.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.safetyTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.safetyDescription}</p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Confirm thread deletion</p>
+                  <p className="text-sm font-medium text-foreground">
+                    {copy.confirmThreadDeletion}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Ask for confirmation before deleting a thread and its chat history.
+                    {copy.confirmThreadDeletionDescription}
                   </p>
                 </div>
                 <Switch
@@ -1419,7 +1708,7 @@ function SettingsRouteView() {
                       confirmThreadDelete: Boolean(checked),
                     })
                   }
-                  aria-label="Confirm thread deletion"
+                  aria-label={copy.confirmThreadDeletion}
                 />
               </div>
 
@@ -1434,25 +1723,21 @@ function SettingsRouteView() {
                       })
                     }
                   >
-                    Restore default
+                    {copy.restoreDefault}
                   </Button>
                 </div>
               ) : null}
             </section>
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
-                <h2 className="text-sm font-medium text-foreground">About</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Application version and environment information.
-                </p>
+                <h2 className="text-sm font-medium text-foreground">{copy.aboutTitle}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.aboutDescription}</p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Version</p>
-                  <p className="text-xs text-muted-foreground">
-                    Current version of the application.
-                  </p>
+                  <p className="text-sm font-medium text-foreground">{copy.version}</p>
+                  <p className="text-xs text-muted-foreground">{copy.versionDescription}</p>
                 </div>
                 <code className="text-xs font-medium text-muted-foreground">{APP_VERSION}</code>
               </div>

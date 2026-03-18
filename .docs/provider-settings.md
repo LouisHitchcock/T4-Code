@@ -7,6 +7,10 @@ CUT3 stores app settings locally on the current device. Open **Settings** in the
 The **Appearance** area currently includes:
 
 - **Theme preference**: `System`, `Light`, or `Dark`
+- **Interface language**:
+  - choose `English` or `Persian`
+  - the setting is stored locally on the current device
+  - Persian also updates the document language/direction and locale-aware time formatting used by the shared web UI
 - **Per-appearance base theme editor**:
   - separate saved base settings for light mode and dark mode
   - editable accent, background, foreground, contrast, UI font stack, code font stack, and UI font size

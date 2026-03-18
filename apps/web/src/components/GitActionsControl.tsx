@@ -2,6 +2,8 @@ import type { GitStackedAction, GitStatusResult, ThreadId } from "@t3tools/contr
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, CloudUploadIcon, GitCommitIcon, InfoIcon } from "lucide-react";
+import { type AppLanguage } from "../appLanguage";
+import { useAppSettings } from "../appSettings";
 import { GitHubIcon } from "./Icons";
 import {
   buildGitActionProgressStages,
@@ -63,20 +65,160 @@ interface PendingDefaultBranchAction {
 type GitActionToastId = ReturnType<typeof toastManager.add>;
 const PREFERRED_REMOTE_NAME = "CUT3";
 
+function getGitActionsUiCopy(language: AppLanguage) {
+  if (language === "fa") {
+    return {
+      genericError: "خطایی رخ داد.",
+      gitActionInProgress: "عملیات git در حال انجام است.",
+      gitStatusUnavailable: "وضعیت git در دسترس نیست.",
+      worktreeCleanBeforeCommit: "worktree پاک است. قبل از commit تغییر ایجاد کنید.",
+      commitUnavailable: "در حال حاضر Commit در دسترس نیست.",
+      detachedHeadBeforePush: "Detached HEAD: قبل از push یک شاخه را checkout کنید.",
+      commitOrStashBeforePush: "پیش از push، تغییرات محلی را commit یا stash کنید.",
+      behindUpstreamBeforePush: "شاخه از upstream عقب است. پیش از push pull/rebase کنید.",
+      addPreferredRemoteBeforePush: (remote: string) =>
+        `پیش از push یک remote با نام "${remote}" اضافه کنید.`,
+      noLocalCommitsToPush: "هیچ commit محلی برای push وجود ندارد.",
+      pushUnavailable: "در حال حاضر Push در دسترس نیست.",
+      viewPrUnavailable: "در حال حاضر مشاهده PR در دسترس نیست.",
+      detachedHeadBeforeCreatePr: "Detached HEAD: قبل از ساخت PR یک شاخه را checkout کنید.",
+      commitBeforeCreatePr: "پیش از ساخت PR تغییرات محلی را commit کنید.",
+      addPreferredRemoteBeforeCreatePr: (remote: string) =>
+        `پیش از ساخت PR یک remote با نام "${remote}" اضافه کنید.`,
+      noLocalCommitsForPr: "هیچ commit محلی برای قرار دادن در PR وجود ندارد.",
+      behindUpstreamBeforeCreatePr: "شاخه از upstream عقب است. پیش از ساخت PR pull/rebase کنید.",
+      createPrUnavailable: "در حال حاضر ساخت PR در دسترس نیست.",
+      commitDialogTitle: "Commit تغییرات",
+      commitDialogDescription:
+        "commit خود را بررسی و تایید کنید. اگر پیام را خالی بگذارید به صورت خودکار ساخته می شود.",
+      linkOpeningUnavailable: "باز کردن پیوند در دسترس نیست.",
+      noOpenPrFound: "هیچ PR بازی پیدا نشد.",
+      unableToOpenPrLink: "باز کردن پیوند PR ممکن نشد",
+      runningGitAction: "در حال اجرای عملیات git...",
+      actionFailed: "عملیات انجام نشد",
+      pushAction: "Push",
+      viewPrAction: "مشاهده PR",
+      createPrAction: "ساخت PR",
+      pulling: "در حال pull...",
+      pulled: "pull انجام شد",
+      alreadyUpToDate: "از قبل به روز است",
+      updatedFrom: (branch: string, upstream: string) => `${branch} از ${upstream} به روز شد`,
+      alreadySynchronized: (branch: string) => `${branch} از قبل همگام است.`,
+      pullFailed: "pull انجام نشد",
+      editorOpeningUnavailable: "باز کردن ویرایشگر در دسترس نیست.",
+      unableToOpenFile: "باز کردن فایل ممکن نشد",
+      initializing: "در حال مقداردهی اولیه...",
+      initializeGit: "مقداردهی اولیه Git",
+      gitActions: "اقدام های Git",
+      gitActionOptions: "گزینه های اقدام های Git",
+      detachedHeadWarningMenu:
+        "Detached HEAD: برای فعال شدن push و PR یک شاخه بسازید و checkout کنید.",
+      behindUpstreamWarningMenu: "از upstream عقب هستید. اول pull/rebase کنید.",
+      refreshingGitStatus: "در حال تازه سازی وضعیت git...",
+      branch: "شاخه",
+      detachedHead: "(detached HEAD)",
+      warningDefaultBranch: "هشدار: شاخه پیش فرض",
+      files: "فایل ها",
+      done: "تمام",
+      edit: "ویرایش",
+      none: "هیچ کدام",
+      excluded: "حذف شده",
+      commitMessageOptional: "پیام commit (اختیاری)",
+      leaveEmptyToAutoGenerate: "خالی بگذارید تا خودکار ساخته شود",
+      cancel: "لغو",
+      commitOnNewBranch: "Commit روی شاخه جدید",
+      commit: "Commit",
+      runActionOnDefaultBranch: "اقدام روی شاخه پیش فرض انجام شود؟",
+      abort: "لغو",
+      continue: "ادامه",
+      checkoutFeatureBranchAndContinue: "checkout شاخه ویژگی و ادامه",
+    };
+  }
+
+  return {
+    genericError: "An error occurred.",
+    gitActionInProgress: "Git action in progress.",
+    gitStatusUnavailable: "Git status is unavailable.",
+    worktreeCleanBeforeCommit: "Worktree is clean. Make changes before committing.",
+    commitUnavailable: "Commit is currently unavailable.",
+    detachedHeadBeforePush: "Detached HEAD: checkout a branch before pushing.",
+    commitOrStashBeforePush: "Commit or stash local changes before pushing.",
+    behindUpstreamBeforePush: "Branch is behind upstream. Pull/rebase before pushing.",
+    addPreferredRemoteBeforePush: (remote: string) => `Add a "${remote}" remote before pushing.`,
+    noLocalCommitsToPush: "No local commits to push.",
+    pushUnavailable: "Push is currently unavailable.",
+    viewPrUnavailable: "View PR is currently unavailable.",
+    detachedHeadBeforeCreatePr: "Detached HEAD: checkout a branch before creating a PR.",
+    commitBeforeCreatePr: "Commit local changes before creating a PR.",
+    addPreferredRemoteBeforeCreatePr: (remote: string) =>
+      `Add a "${remote}" remote before creating a PR.`,
+    noLocalCommitsForPr: "No local commits to include in a PR.",
+    behindUpstreamBeforeCreatePr: "Branch is behind upstream. Pull/rebase before creating a PR.",
+    createPrUnavailable: "Create PR is currently unavailable.",
+    commitDialogTitle: "Commit changes",
+    commitDialogDescription:
+      "Review and confirm your commit. Leave the message blank to auto-generate one.",
+    linkOpeningUnavailable: "Link opening is unavailable.",
+    noOpenPrFound: "No open PR found.",
+    unableToOpenPrLink: "Unable to open PR link",
+    runningGitAction: "Running git action...",
+    actionFailed: "Action failed",
+    pushAction: "Push",
+    viewPrAction: "View PR",
+    createPrAction: "Create PR",
+    pulling: "Pulling...",
+    pulled: "Pulled",
+    alreadyUpToDate: "Already up to date",
+    updatedFrom: (branch: string, upstream: string) => `Updated ${branch} from ${upstream}`,
+    alreadySynchronized: (branch: string) => `${branch} is already synchronized.`,
+    pullFailed: "Pull failed",
+    editorOpeningUnavailable: "Editor opening is unavailable.",
+    unableToOpenFile: "Unable to open file",
+    initializing: "Initializing...",
+    initializeGit: "Initialize Git",
+    gitActions: "Git actions",
+    gitActionOptions: "Git action options",
+    detachedHeadWarningMenu:
+      "Detached HEAD: create and checkout a branch to enable push and PR actions.",
+    behindUpstreamWarningMenu: "Behind upstream. Pull/rebase first.",
+    refreshingGitStatus: "Refreshing git status...",
+    branch: "Branch",
+    detachedHead: "(detached HEAD)",
+    warningDefaultBranch: "Warning: default branch",
+    files: "Files",
+    done: "Done",
+    edit: "Edit",
+    none: "none",
+    excluded: "Excluded",
+    commitMessageOptional: "Commit message (optional)",
+    leaveEmptyToAutoGenerate: "Leave empty to auto-generate",
+    cancel: "Cancel",
+    commitOnNewBranch: "Commit on new branch",
+    commit: "Commit",
+    runActionOnDefaultBranch: "Run action on default branch?",
+    abort: "Abort",
+    continue: "Continue",
+    checkoutFeatureBranchAndContinue: "Checkout feature branch & continue",
+  };
+}
+
 function getMenuActionDisabledReason({
   item,
   gitStatus,
   isBusy,
   hasPreferredRemote,
+  language,
 }: {
   item: GitActionMenuItem;
   gitStatus: GitStatusResult | null;
   isBusy: boolean;
   hasPreferredRemote: boolean;
+  language: AppLanguage;
 }): string | null {
+  const copy = getGitActionsUiCopy(language);
   if (!item.disabled) return null;
-  if (isBusy) return "Git action in progress.";
-  if (!gitStatus) return "Git status is unavailable.";
+  if (isBusy) return copy.gitActionInProgress;
+  if (!gitStatus) return copy.gitStatusUnavailable;
 
   const hasBranch = gitStatus.branch !== null;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
@@ -86,54 +228,50 @@ function getMenuActionDisabledReason({
 
   if (item.id === "commit") {
     if (!hasChanges) {
-      return "Worktree is clean. Make changes before committing.";
+      return copy.worktreeCleanBeforeCommit;
     }
-    return "Commit is currently unavailable.";
+    return copy.commitUnavailable;
   }
 
   if (item.id === "push") {
     if (!hasBranch) {
-      return "Detached HEAD: checkout a branch before pushing.";
+      return copy.detachedHeadBeforePush;
     }
     if (hasChanges) {
-      return "Commit or stash local changes before pushing.";
+      return copy.commitOrStashBeforePush;
     }
     if (isBehind) {
-      return "Branch is behind upstream. Pull/rebase before pushing.";
+      return copy.behindUpstreamBeforePush;
     }
     if (!gitStatus.hasUpstream && !hasPreferredRemote) {
-      return `Add a "${PREFERRED_REMOTE_NAME}" remote before pushing.`;
+      return copy.addPreferredRemoteBeforePush(PREFERRED_REMOTE_NAME);
     }
     if (!isAhead) {
-      return "No local commits to push.";
+      return copy.noLocalCommitsToPush;
     }
-    return "Push is currently unavailable.";
+    return copy.pushUnavailable;
   }
 
   if (hasOpenPr) {
-    return "View PR is currently unavailable.";
+    return copy.viewPrUnavailable;
   }
   if (!hasBranch) {
-    return "Detached HEAD: checkout a branch before creating a PR.";
+    return copy.detachedHeadBeforeCreatePr;
   }
   if (hasChanges) {
-    return "Commit local changes before creating a PR.";
+    return copy.commitBeforeCreatePr;
   }
   if (!gitStatus.hasUpstream && !hasPreferredRemote) {
-    return `Add a "${PREFERRED_REMOTE_NAME}" remote before creating a PR.`;
+    return copy.addPreferredRemoteBeforeCreatePr(PREFERRED_REMOTE_NAME);
   }
   if (!isAhead) {
-    return "No local commits to include in a PR.";
+    return copy.noLocalCommitsForPr;
   }
   if (isBehind) {
-    return "Branch is behind upstream. Pull/rebase before creating a PR.";
+    return copy.behindUpstreamBeforeCreatePr;
   }
-  return "Create PR is currently unavailable.";
+  return copy.createPrUnavailable;
 }
-
-const COMMIT_DIALOG_TITLE = "Commit changes";
-const COMMIT_DIALOG_DESCRIPTION =
-  "Review and confirm your commit. Leave the message blank to auto-generate one.";
 
 function GitActionItemIcon({ icon }: { icon: GitActionIconName }) {
   if (icon === "commit") return <GitCommitIcon />;
@@ -155,6 +293,10 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
 }
 
 export default function GitActionsControl({ gitCwd, activeThreadId }: GitActionsControlProps) {
+  const {
+    settings: { language },
+  } = useAppSettings();
+  const gitCopy = useMemo(() => getGitActionsUiCopy(language), [language]);
   const threadToastData = useMemo(
     () => (activeThreadId ? { threadId: activeThreadId } : undefined),
     [activeThreadId],
@@ -208,8 +350,8 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
   }, [branchList?.branches, gitStatusForActions?.branch]);
 
   const gitActionMenuItems = useMemo(
-    () => buildMenuItems(gitStatusForActions, isGitActionRunning, hasPreferredRemote),
-    [gitStatusForActions, hasPreferredRemote, isGitActionRunning],
+    () => buildMenuItems(gitStatusForActions, isGitActionRunning, hasPreferredRemote, language),
+    [gitStatusForActions, hasPreferredRemote, isGitActionRunning, language],
   );
   const quickAction = useMemo(
     () =>
@@ -218,18 +360,22 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
         isGitActionRunning,
         isDefaultBranch,
         hasPreferredRemote,
+        language,
       ),
-    [gitStatusForActions, hasPreferredRemote, isDefaultBranch, isGitActionRunning],
+    [gitStatusForActions, hasPreferredRemote, isDefaultBranch, isGitActionRunning, language],
   );
   const quickActionDisabledReason = quickAction.disabled
-    ? (quickAction.hint ?? "This action is currently unavailable.")
+    ? (quickAction.hint ?? gitCopy.gitStatusUnavailable)
     : null;
   const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
-    ? resolveDefaultBranchActionDialogCopy({
-        action: pendingDefaultBranchAction.action,
-        branchName: pendingDefaultBranchAction.branchName,
-        includesCommit: pendingDefaultBranchAction.includesCommit,
-      })
+    ? resolveDefaultBranchActionDialogCopy(
+        {
+          action: pendingDefaultBranchAction.action,
+          branchName: pendingDefaultBranchAction.branchName,
+          includesCommit: pendingDefaultBranchAction.includesCommit,
+        },
+        language,
+      )
     : null;
 
   const openExistingPr = useCallback(async () => {
@@ -237,7 +383,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     if (!api) {
       toastManager.add({
         type: "error",
-        title: "Link opening is unavailable.",
+        title: gitCopy.linkOpeningUnavailable,
         data: threadToastData,
       });
       return;
@@ -246,7 +392,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     if (!prUrl) {
       toastManager.add({
         type: "error",
-        title: "No open PR found.",
+        title: gitCopy.noOpenPrFound,
         data: threadToastData,
       });
       return;
@@ -254,12 +400,20 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     void api.shell.openExternal(prUrl).catch((err) => {
       toastManager.add({
         type: "error",
-        title: "Unable to open PR link",
-        description: err instanceof Error ? err.message : "An error occurred.",
+        title: gitCopy.unableToOpenPrLink,
+        description: err instanceof Error ? err.message : gitCopy.genericError,
         data: threadToastData,
       });
     });
-  }, [gitStatusForActions?.pr?.state, gitStatusForActions?.pr?.url, threadToastData]);
+  }, [
+    gitCopy.genericError,
+    gitCopy.linkOpeningUnavailable,
+    gitCopy.noOpenPrFound,
+    gitCopy.unableToOpenPrLink,
+    gitStatusForActions?.pr?.state,
+    gitStatusForActions?.pr?.url,
+    threadToastData,
+  ]);
 
   const runGitActionWithToast = useCallback(
     async ({
@@ -312,18 +466,21 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       }
       onConfirmed?.();
 
-      const progressStages = buildGitActionProgressStages({
-        action,
-        hasCustomCommitMessage: !!commitMessage?.trim(),
-        hasWorkingTreeChanges: !!actionStatus?.hasWorkingTreeChanges,
-        forcePushOnly: forcePushOnlyProgress,
-        featureBranch,
-      });
+      const progressStages = buildGitActionProgressStages(
+        {
+          action,
+          hasCustomCommitMessage: !!commitMessage?.trim(),
+          hasWorkingTreeChanges: !!actionStatus?.hasWorkingTreeChanges,
+          forcePushOnly: forcePushOnlyProgress,
+          featureBranch,
+        },
+        language,
+      );
       const resolvedProgressToastId =
         progressToastId ??
         toastManager.add({
           type: "loading",
-          title: progressStages[0] ?? "Running git action...",
+          title: progressStages[0] ?? gitCopy.runningGitAction,
           timeout: 0,
           data: threadToastData,
         });
@@ -331,7 +488,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       if (progressToastId) {
         toastManager.update(progressToastId, {
           type: "loading",
-          title: progressStages[0] ?? "Running git action...",
+          title: progressStages[0] ?? gitCopy.runningGitAction,
           timeout: 0,
           data: threadToastData,
         });
@@ -341,7 +498,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       const stageInterval = setInterval(() => {
         stageIndex = Math.min(stageIndex + 1, progressStages.length - 1);
         toastManager.update(resolvedProgressToastId, {
-          title: progressStages[stageIndex] ?? "Running git action...",
+          title: progressStages[stageIndex] ?? gitCopy.runningGitAction,
           type: "loading",
           timeout: 0,
           data: threadToastData,
@@ -362,7 +519,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       try {
         const result = await promise;
         stopProgressUpdates();
-        const resultToast = summarizeGitResult(result);
+        const resultToast = summarizeGitResult(result, language);
 
         const existingOpenPrUrl =
           actionStatus?.pr?.state === "open" ? actionStatus.pr.url : undefined;
@@ -395,7 +552,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
           ...(shouldOfferPushCta
             ? {
                 actionProps: {
-                  children: "Push",
+                  children: gitCopy.pushAction,
                   onClick: () => {
                     void runGitActionWithToast({
                       action: "commit_push",
@@ -410,7 +567,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
             : shouldOfferOpenPrCta
               ? {
                   actionProps: {
-                    children: "View PR",
+                    children: gitCopy.viewPrAction,
                     onClick: () => {
                       const api = readNativeApi();
                       if (!api) return;
@@ -422,7 +579,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
               : shouldOfferCreatePrCta
                 ? {
                     actionProps: {
-                      children: "Create PR",
+                      children: gitCopy.createPrAction,
                       onClick: () => {
                         closeResultToast();
                         void runGitActionWithToast({
@@ -440,8 +597,8 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
         stopProgressUpdates();
         toastManager.update(resolvedProgressToastId, {
           type: "error",
-          title: "Action failed",
-          description: err instanceof Error ? err.message : "An error occurred.",
+          title: gitCopy.actionFailed,
+          description: err instanceof Error ? err.message : gitCopy.genericError,
           data: threadToastData,
         });
       }
@@ -453,6 +610,8 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       setPendingDefaultBranchAction,
       threadToastData,
       gitStatusForActions,
+      gitCopy,
+      language,
     ],
   );
 
@@ -532,18 +691,18 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     if (quickAction.kind === "run_pull") {
       const promise = pullMutation.mutateAsync();
       toastManager.promise(promise, {
-        loading: { title: "Pulling...", data: threadToastData },
+        loading: { title: gitCopy.pulling, data: threadToastData },
         success: (result) => ({
-          title: result.status === "pulled" ? "Pulled" : "Already up to date",
+          title: result.status === "pulled" ? gitCopy.pulled : gitCopy.alreadyUpToDate,
           description:
             result.status === "pulled"
-              ? `Updated ${result.branch} from ${result.upstreamBranch ?? "upstream"}`
-              : `${result.branch} is already synchronized.`,
+              ? gitCopy.updatedFrom(result.branch, result.upstreamBranch ?? "upstream")
+              : gitCopy.alreadySynchronized(result.branch),
           data: threadToastData,
         }),
         error: (err) => ({
-          title: "Pull failed",
-          description: err instanceof Error ? err.message : "An error occurred.",
+          title: gitCopy.pullFailed,
+          description: err instanceof Error ? err.message : gitCopy.genericError,
           data: threadToastData,
         }),
       });
@@ -562,7 +721,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     if (quickAction.action) {
       void runGitActionWithToast({ action: quickAction.action });
     }
-  }, [openExistingPr, pullMutation, quickAction, runGitActionWithToast, threadToastData]);
+  }, [gitCopy, openExistingPr, pullMutation, quickAction, runGitActionWithToast, threadToastData]);
 
   const openDialogForMenuItem = useCallback(
     (item: GitActionMenuItem) => {
@@ -614,7 +773,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       if (!api || !gitCwd) {
         toastManager.add({
           type: "error",
-          title: "Editor opening is unavailable.",
+          title: gitCopy.editorOpeningUnavailable,
           data: threadToastData,
         });
         return;
@@ -623,13 +782,19 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       void openInPreferredEditor(api, target).catch((error) => {
         toastManager.add({
           type: "error",
-          title: "Unable to open file",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          title: gitCopy.unableToOpenFile,
+          description: error instanceof Error ? error.message : gitCopy.genericError,
           data: threadToastData,
         });
       });
     },
-    [gitCwd, threadToastData],
+    [
+      gitCopy.editorOpeningUnavailable,
+      gitCopy.genericError,
+      gitCopy.unableToOpenFile,
+      gitCwd,
+      threadToastData,
+    ],
   );
 
   if (!gitCwd) return null;
@@ -643,10 +808,10 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
           disabled={initMutation.isPending}
           onClick={() => initMutation.mutate()}
         >
-          {initMutation.isPending ? "Initializing..." : "Initialize Git"}
+          {initMutation.isPending ? gitCopy.initializing : gitCopy.initializeGit}
         </Button>
       ) : (
-        <Group aria-label="Git actions">
+        <Group aria-label={gitCopy.gitActions}>
           {quickActionDisabledReason ? (
             <Popover>
               <PopoverTrigger
@@ -689,7 +854,9 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
             }}
           >
             <MenuTrigger
-              render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
+              render={
+                <Button aria-label={gitCopy.gitActionOptions} size="icon-xs" variant="outline" />
+              }
               disabled={isGitActionRunning}
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />
@@ -701,6 +868,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                   gitStatus: gitStatusForActions,
                   isBusy: isGitActionRunning,
                   hasPreferredRemote,
+                  language,
                 });
                 if (item.disabled && disabledReason) {
                   return (
@@ -737,7 +905,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
               })}
               {gitStatusForActions?.branch === null && (
                 <p className="px-2 py-1.5 text-xs text-warning">
-                  Detached HEAD: create and checkout a branch to enable push and PR actions.
+                  {gitCopy.detachedHeadWarningMenu}
                 </p>
               )}
               {gitStatusForActions &&
@@ -746,12 +914,12 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                 gitStatusForActions.behindCount > 0 &&
                 gitStatusForActions.aheadCount === 0 && (
                   <p className="px-2 py-1.5 text-xs text-warning">
-                    Behind upstream. Pull/rebase first.
+                    {gitCopy.behindUpstreamWarningMenu}
                   </p>
                 )}
               {isGitStatusOutOfSync && (
                 <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                  Refreshing git status...
+                  {gitCopy.refreshingGitStatus}
                 </p>
               )}
               {gitStatusError && (
@@ -775,19 +943,21 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       >
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>{COMMIT_DIALOG_TITLE}</DialogTitle>
-            <DialogDescription>{COMMIT_DIALOG_DESCRIPTION}</DialogDescription>
+            <DialogTitle>{gitCopy.commitDialogTitle}</DialogTitle>
+            <DialogDescription>{gitCopy.commitDialogDescription}</DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
             <div className="space-y-3 rounded-lg border border-input bg-muted/40 p-3 text-xs">
               <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
-                <span className="text-muted-foreground">Branch</span>
+                <span className="text-muted-foreground">{gitCopy.branch}</span>
                 <span className="flex items-center justify-between gap-2">
                   <span className="font-medium">
-                    {gitStatusForActions?.branch ?? "(detached HEAD)"}
+                    {gitStatusForActions?.branch ?? gitCopy.detachedHead}
                   </span>
                   {isDefaultBranch && (
-                    <span className="text-right text-warning text-xs">Warning: default branch</span>
+                    <span className="text-right text-warning text-xs">
+                      {gitCopy.warningDefaultBranch}
+                    </span>
                   )}
                 </span>
               </div>
@@ -805,7 +975,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                         }}
                       />
                     )}
-                    <span className="text-muted-foreground">Files</span>
+                    <span className="text-muted-foreground">{gitCopy.files}</span>
                     {!allSelected && !isEditingFiles && (
                       <span className="text-muted-foreground">
                         ({selectedFiles.length} of {allFiles.length})
@@ -818,12 +988,12 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                       size="xs"
                       onClick={() => setIsEditingFiles((prev) => !prev)}
                     >
-                      {isEditingFiles ? "Done" : "Edit"}
+                      {isEditingFiles ? gitCopy.done : gitCopy.edit}
                     </Button>
                   )}
                 </div>
                 {!gitStatusForActions || allFiles.length === 0 ? (
-                  <p className="font-medium">none</p>
+                  <p className="font-medium">{gitCopy.none}</p>
                 ) : (
                   <div className="space-y-2">
                     <ScrollArea className="h-44 rounded-md border border-input bg-background">
@@ -863,7 +1033,9 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                                 </span>
                                 <span className="shrink-0">
                                   {isExcluded ? (
-                                    <span className="text-muted-foreground">Excluded</span>
+                                    <span className="text-muted-foreground">
+                                      {gitCopy.excluded}
+                                    </span>
                                   ) : (
                                     <>
                                       <span className="text-success">+{file.insertions}</span>
@@ -892,11 +1064,11 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
               </div>
             </div>
             <div className="space-y-1">
-              <p className="text-xs font-medium">Commit message (optional)</p>
+              <p className="text-xs font-medium">{gitCopy.commitMessageOptional}</p>
               <Textarea
                 value={dialogCommitMessage}
                 onChange={(event) => setDialogCommitMessage(event.target.value)}
-                placeholder="Leave empty to auto-generate"
+                placeholder={gitCopy.leaveEmptyToAutoGenerate}
                 size="sm"
               />
             </div>
@@ -912,7 +1084,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                 setIsEditingFiles(false);
               }}
             >
-              Cancel
+              {gitCopy.cancel}
             </Button>
             <Button
               variant="outline"
@@ -920,10 +1092,10 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
               disabled={noneSelected}
               onClick={runDialogActionOnNewBranch}
             >
-              Commit on new branch
+              {gitCopy.commitOnNewBranch}
             </Button>
             <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
-              Commit
+              {gitCopy.commit}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -940,19 +1112,19 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
         <DialogPopup className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {pendingDefaultBranchActionCopy?.title ?? "Run action on default branch?"}
+              {pendingDefaultBranchActionCopy?.title ?? gitCopy.runActionOnDefaultBranch}
             </DialogTitle>
             <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setPendingDefaultBranchAction(null)}>
-              Abort
+              {gitCopy.abort}
             </Button>
             <Button variant="outline" size="sm" onClick={continuePendingDefaultBranchAction}>
-              {pendingDefaultBranchActionCopy?.continueLabel ?? "Continue"}
+              {pendingDefaultBranchActionCopy?.continueLabel ?? gitCopy.continue}
             </Button>
             <Button size="sm" onClick={checkoutFeatureBranchAndContinuePendingAction}>
-              Checkout feature branch & continue
+              {gitCopy.checkoutFeatureBranchAndContinue}
             </Button>
           </DialogFooter>
         </DialogPopup>

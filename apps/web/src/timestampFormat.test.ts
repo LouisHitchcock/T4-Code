@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getTimestampFormatOptions } from "./timestampFormat";
 
@@ -26,5 +26,28 @@ describe("getTimestampFormatOptions", () => {
       minute: "2-digit",
       hour12: false,
     });
+  });
+
+  it("uses the selected app language locale for formatter creation", async () => {
+    vi.resetModules();
+    vi.doMock("./appSettings", async () => {
+      const actual = await vi.importActual<typeof import("./appSettings")>("./appSettings");
+
+      return {
+        ...actual,
+        getAppSettingsSnapshot: () => ({
+          ...actual.getAppSettingsSnapshot(),
+          language: "fa" as const,
+        }),
+      };
+    });
+
+    try {
+      const { getTimestampFormatterLocale } = await import("./timestampFormat");
+      expect(getTimestampFormatterLocale()).toBe("fa-IR");
+    } finally {
+      vi.doUnmock("./appSettings");
+      vi.resetModules();
+    }
   });
 });

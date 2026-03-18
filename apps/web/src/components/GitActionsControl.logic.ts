@@ -3,6 +3,7 @@ import type {
   GitStackedAction,
   GitStatusResult,
 } from "@t3tools/contracts";
+import { type AppLanguage } from "../appLanguage";
 
 export type GitActionIconName = "commit" | "push" | "pr";
 
@@ -37,6 +38,104 @@ const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
 const PREFERRED_REMOTE_NAME = "CUT3";
 
+function getGitActionLogicCopy(language: AppLanguage) {
+  if (language === "fa") {
+    return {
+      preparingFeatureBranch: "در حال آماده سازی شاخه ویژگی...",
+      generatingCommitMessage: "در حال ساخت پیام commit...",
+      committing: "در حال commit...",
+      pushingTo: (target: string) => `در حال push به ${target}...`,
+      pushing: "در حال push...",
+      creatingPr: "در حال ساخت PR...",
+      createdPr: "PR ساخته شد",
+      openedPr: "PR باز شد",
+      pushed: "push انجام شد",
+      committed: "Commit شد",
+      committedChanges: "تغییرات commit شد",
+      done: "انجام شد",
+      commit: "Commit",
+      push: "Push",
+      viewPr: "مشاهده PR",
+      createPr: "ساخت PR",
+      commitAndPush: "Commit و Push",
+      commitPushPr: "Commit، Push و PR",
+      pushCreatePr: "Push و ساخت PR",
+      syncBranch: "همگام سازی شاخه",
+      pull: "Pull",
+      gitActionInProgress: "عملیات git در حال انجام است.",
+      gitStatusUnavailable: "وضعیت git در دسترس نیست.",
+      createAndCheckoutBranchBeforePushOrPr:
+        "قبل از push یا باز کردن PR یک شاخه بسازید و checkout کنید.",
+      addRemoteBeforePushOrPr: (remote: string) =>
+        `پیش از push یا ساخت PR یک remote با نام "${remote}" اضافه کنید.`,
+      noLocalCommitsToPush: "هیچ commit محلی برای push وجود ندارد.",
+      branchDiverged: "شاخه از upstream جدا شده است. اول rebase/merge کنید.",
+      branchUpToDateNoAction: "شاخه به روز است. اقدامی لازم نیست.",
+      commitPushDefaultBranchTitle: "Commit و push به شاخه پیش فرض؟",
+      pushDefaultBranchTitle: "Push به شاخه پیش فرض؟",
+      commitPushCreatePrDefaultBranchTitle: "Commit، push و ساخت PR از شاخه پیش فرض؟",
+      pushCreatePrDefaultBranchTitle: "Push و ساخت PR از شاخه پیش فرض؟",
+      commitAndPushChangesSummary: "این عمل تغییرات را commit و push می کند",
+      pushLocalCommitsSummary: "این عمل commit های محلی را push می کند",
+      commitPushCreatePrSummary: "این عمل commit می کند، push می کند و یک PR می سازد",
+      pushLocalCommitsCreatePrSummary: "این عمل commit های محلی را push می کند و یک PR می سازد",
+      defaultBranchDescription: (branch: string, summary: string) =>
+        `${summary} روی "${branch}" انجام می شود. می توانید روی همین شاخه ادامه دهید یا یک شاخه ویژگی بسازید و همین عمل را آنجا اجرا کنید.`,
+      continueCommitAndPushTo: (branch: string) => `Commit و push به ${branch}`,
+      continuePushTo: (branch: string) => `Push به ${branch}`,
+      continueCommitPushPr: "Commit، push و ساخت PR",
+      continuePushPr: "Push و ساخت PR",
+    };
+  }
+
+  return {
+    preparingFeatureBranch: "Preparing feature branch...",
+    generatingCommitMessage: "Generating commit message...",
+    committing: "Committing...",
+    pushingTo: (target: string) => `Pushing to ${target}...`,
+    pushing: "Pushing...",
+    creatingPr: "Creating PR...",
+    createdPr: "Created PR",
+    openedPr: "Opened PR",
+    pushed: "Pushed",
+    committed: "Committed",
+    committedChanges: "Committed changes",
+    done: "Done",
+    commit: "Commit",
+    push: "Push",
+    viewPr: "View PR",
+    createPr: "Create PR",
+    commitAndPush: "Commit & push",
+    commitPushPr: "Commit, push & PR",
+    pushCreatePr: "Push & create PR",
+    syncBranch: "Sync branch",
+    pull: "Pull",
+    gitActionInProgress: "Git action in progress.",
+    gitStatusUnavailable: "Git status is unavailable.",
+    createAndCheckoutBranchBeforePushOrPr:
+      "Create and checkout a branch before pushing or opening a PR.",
+    addRemoteBeforePushOrPr: (remote: string) =>
+      `Add a "${remote}" remote before pushing or creating a PR.`,
+    noLocalCommitsToPush: "No local commits to push.",
+    branchDiverged: "Branch has diverged from upstream. Rebase/merge first.",
+    branchUpToDateNoAction: "Branch is up to date. No action needed.",
+    commitPushDefaultBranchTitle: "Commit & push to default branch?",
+    pushDefaultBranchTitle: "Push to default branch?",
+    commitPushCreatePrDefaultBranchTitle: "Commit, push & create PR from default branch?",
+    pushCreatePrDefaultBranchTitle: "Push & create PR from default branch?",
+    commitAndPushChangesSummary: "This action will commit and push changes",
+    pushLocalCommitsSummary: "This action will push local commits",
+    commitPushCreatePrSummary: "This action will commit, push, and create a PR",
+    pushLocalCommitsCreatePrSummary: "This action will push local commits and create a PR",
+    defaultBranchDescription: (branch: string, summary: string) =>
+      `${summary} on "${branch}". You can continue on this branch or create a feature branch and run the same action there.`,
+    continueCommitAndPushTo: (branch: string) => `Commit & push to ${branch}`,
+    continuePushTo: (branch: string) => `Push to ${branch}`,
+    continueCommitPushPr: "Commit, push & create PR",
+    continuePushPr: "Push & create PR",
+  };
+}
+
 function shortenSha(sha: string | undefined): string | null {
   if (!sha) return null;
   return sha.slice(0, SHORT_SHA_LENGTH);
@@ -52,42 +151,50 @@ function truncateText(
   return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
-export function buildGitActionProgressStages(input: {
-  action: GitStackedAction;
-  hasCustomCommitMessage: boolean;
-  hasWorkingTreeChanges: boolean;
-  forcePushOnly?: boolean;
-  pushTarget?: string;
-  featureBranch?: boolean;
-}): string[] {
-  const branchStages = input.featureBranch ? ["Preparing feature branch..."] : [];
+export function buildGitActionProgressStages(
+  input: {
+    action: GitStackedAction;
+    hasCustomCommitMessage: boolean;
+    hasWorkingTreeChanges: boolean;
+    forcePushOnly?: boolean;
+    pushTarget?: string;
+    featureBranch?: boolean;
+  },
+  language: AppLanguage = "en",
+): string[] {
+  const copy = getGitActionLogicCopy(language);
+  const branchStages = input.featureBranch ? [copy.preparingFeatureBranch] : [];
   const shouldIncludeCommitStages =
     !input.forcePushOnly && (input.action === "commit" || input.hasWorkingTreeChanges);
   const commitStages = !shouldIncludeCommitStages
     ? []
     : input.hasCustomCommitMessage
-      ? ["Committing..."]
-      : ["Generating commit message...", "Committing..."];
-  const pushStage = input.pushTarget ? `Pushing to ${input.pushTarget}...` : "Pushing...";
+      ? [copy.committing]
+      : [copy.generatingCommitMessage, copy.committing];
+  const pushStage = input.pushTarget ? copy.pushingTo(input.pushTarget) : copy.pushing;
   if (input.action === "commit") {
     return [...branchStages, ...commitStages];
   }
   if (input.action === "commit_push") {
     return [...branchStages, ...commitStages, pushStage];
   }
-  return [...branchStages, ...commitStages, pushStage, "Creating PR..."];
+  return [...branchStages, ...commitStages, pushStage, copy.creatingPr];
 }
 
 const withDescription = (title: string, description: string | undefined) =>
   description ? { title, description } : { title };
 
-export function summarizeGitResult(result: GitRunStackedActionResult): {
+export function summarizeGitResult(
+  result: GitRunStackedActionResult,
+  language: AppLanguage = "en",
+): {
   title: string;
   description?: string;
 } {
+  const copy = getGitActionLogicCopy(language);
   if (result.pr.status === "created" || result.pr.status === "opened_existing") {
     const prNumber = result.pr.number ? ` #${result.pr.number}` : "";
-    const title = `${result.pr.status === "created" ? "Created PR" : "Opened PR"}${prNumber}`;
+    const title = `${result.pr.status === "created" ? copy.createdPr : copy.openedPr}${prNumber}`;
     return withDescription(title, truncateText(result.pr.title));
   }
 
@@ -97,25 +204,27 @@ export function summarizeGitResult(result: GitRunStackedActionResult): {
     const pushedCommitPart = shortSha ? ` ${shortSha}` : "";
     const branchPart = branch ? ` to ${branch}` : "";
     return withDescription(
-      `Pushed${pushedCommitPart}${branchPart}`,
+      `${copy.pushed}${pushedCommitPart}${branchPart}`,
       truncateText(result.commit.subject),
     );
   }
 
   if (result.commit.status === "created") {
     const shortSha = shortenSha(result.commit.commitSha);
-    const title = shortSha ? `Committed ${shortSha}` : "Committed changes";
+    const title = shortSha ? `${copy.committed} ${shortSha}` : copy.committedChanges;
     return withDescription(title, truncateText(result.commit.subject));
   }
 
-  return { title: "Done" };
+  return { title: copy.done };
 }
 
 export function buildMenuItems(
   gitStatus: GitStatusResult | null,
   isBusy: boolean,
   hasPreferredRemote = true,
+  language: AppLanguage = "en",
 ): GitActionMenuItem[] {
+  const copy = getGitActionLogicCopy(language);
   if (!gitStatus) return [];
 
   const hasBranch = gitStatus.branch !== null;
@@ -144,7 +253,7 @@ export function buildMenuItems(
   return [
     {
       id: "commit",
-      label: "Commit",
+      label: copy.commit,
       disabled: !canCommit,
       icon: "commit",
       kind: "open_dialog",
@@ -152,7 +261,7 @@ export function buildMenuItems(
     },
     {
       id: "push",
-      label: "Push",
+      label: copy.push,
       disabled: !canPush,
       icon: "push",
       kind: "open_dialog",
@@ -161,14 +270,14 @@ export function buildMenuItems(
     hasOpenPr
       ? {
           id: "pr",
-          label: "View PR",
+          label: copy.viewPr,
           disabled: !canOpenPr,
           icon: "pr",
           kind: "open_pr",
         }
       : {
           id: "pr",
-          label: "Create PR",
+          label: copy.createPr,
           disabled: !canCreatePr,
           icon: "pr",
           kind: "open_dialog",
@@ -182,17 +291,24 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultBranch = false,
   hasPreferredRemote = true,
+  language: AppLanguage = "en",
 ): GitQuickAction {
+  const copy = getGitActionLogicCopy(language);
   if (isBusy) {
-    return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
+    return {
+      label: copy.commit,
+      disabled: true,
+      kind: "show_hint",
+      hint: copy.gitActionInProgress,
+    };
   }
 
   if (!gitStatus) {
     return {
-      label: "Commit",
+      label: copy.commit,
       disabled: true,
       kind: "show_hint",
-      hint: "Git status is unavailable.",
+      hint: copy.gitStatusUnavailable,
     };
   }
 
@@ -205,22 +321,27 @@ export function resolveQuickAction(
 
   if (!hasBranch) {
     return {
-      label: "Commit",
+      label: copy.commit,
       disabled: true,
       kind: "show_hint",
-      hint: "Create and checkout a branch before pushing or opening a PR.",
+      hint: copy.createAndCheckoutBranchBeforePushOrPr,
     };
   }
 
   if (hasChanges) {
     if (!gitStatus.hasUpstream && !hasPreferredRemote) {
-      return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
+      return { label: copy.commit, disabled: false, kind: "run_action", action: "commit" };
     }
     if (hasOpenPr || isDefaultBranch) {
-      return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
+      return {
+        label: copy.commitAndPush,
+        disabled: false,
+        kind: "run_action",
+        action: "commit_push",
+      };
     }
     return {
-      label: "Commit, push & PR",
+      label: copy.commitPushPr,
       disabled: false,
       kind: "run_action",
       action: "commit_push_pr",
@@ -230,31 +351,31 @@ export function resolveQuickAction(
   if (!gitStatus.hasUpstream) {
     if (!hasPreferredRemote) {
       if (hasOpenPr && !isAhead) {
-        return { label: "View PR", disabled: false, kind: "open_pr" };
+        return { label: copy.viewPr, disabled: false, kind: "open_pr" };
       }
       return {
-        label: "Push",
+        label: copy.push,
         disabled: true,
         kind: "show_hint",
-        hint: `Add a "${PREFERRED_REMOTE_NAME}" remote before pushing or creating a PR.`,
+        hint: copy.addRemoteBeforePushOrPr(PREFERRED_REMOTE_NAME),
       };
     }
     if (!isAhead) {
       if (hasOpenPr) {
-        return { label: "View PR", disabled: false, kind: "open_pr" };
+        return { label: copy.viewPr, disabled: false, kind: "open_pr" };
       }
       return {
-        label: "Push",
+        label: copy.push,
         disabled: true,
         kind: "show_hint",
-        hint: "No local commits to push.",
+        hint: copy.noLocalCommitsToPush,
       };
     }
     if (hasOpenPr || isDefaultBranch) {
-      return { label: "Push", disabled: false, kind: "run_action", action: "commit_push" };
+      return { label: copy.push, disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
-      label: "Push & create PR",
+      label: copy.pushCreatePr,
       disabled: false,
       kind: "run_action",
       action: "commit_push_pr",
@@ -263,16 +384,16 @@ export function resolveQuickAction(
 
   if (isDiverged) {
     return {
-      label: "Sync branch",
+      label: copy.syncBranch,
       disabled: true,
       kind: "show_hint",
-      hint: "Branch has diverged from upstream. Rebase/merge first.",
+      hint: copy.branchDiverged,
     };
   }
 
   if (isBehind) {
     return {
-      label: "Pull",
+      label: copy.pull,
       disabled: false,
       kind: "run_pull",
     };
@@ -280,10 +401,10 @@ export function resolveQuickAction(
 
   if (isAhead) {
     if (hasOpenPr || isDefaultBranch) {
-      return { label: "Push", disabled: false, kind: "run_action", action: "commit_push" };
+      return { label: copy.push, disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
-      label: "Push & create PR",
+      label: copy.pushCreatePr,
       disabled: false,
       kind: "run_action",
       action: "commit_push_pr",
@@ -291,14 +412,14 @@ export function resolveQuickAction(
   }
 
   if (hasOpenPr && gitStatus.hasUpstream) {
-    return { label: "View PR", disabled: false, kind: "open_pr" };
+    return { label: copy.viewPr, disabled: false, kind: "open_pr" };
   }
 
   return {
-    label: "Commit",
+    label: copy.commit,
     disabled: true,
     kind: "show_hint",
-    hint: "Branch is up to date. No action needed.",
+    hint: copy.branchUpToDateNoAction,
   };
 }
 
@@ -310,40 +431,43 @@ export function requiresDefaultBranchConfirmation(
   return action === "commit_push" || action === "commit_push_pr";
 }
 
-export function resolveDefaultBranchActionDialogCopy(input: {
-  action: DefaultBranchConfirmableAction;
-  branchName: string;
-  includesCommit: boolean;
-}): DefaultBranchActionDialogCopy {
+export function resolveDefaultBranchActionDialogCopy(
+  input: {
+    action: DefaultBranchConfirmableAction;
+    branchName: string;
+    includesCommit: boolean;
+  },
+  language: AppLanguage = "en",
+): DefaultBranchActionDialogCopy {
+  const copy = getGitActionLogicCopy(language);
   const branchLabel = input.branchName;
-  const suffix = ` on "${branchLabel}". You can continue on this branch or create a feature branch and run the same action there.`;
 
   if (input.action === "commit_push") {
     if (input.includesCommit) {
       return {
-        title: "Commit & push to default branch?",
-        description: `This action will commit and push changes${suffix}`,
-        continueLabel: `Commit & push to ${branchLabel}`,
+        title: copy.commitPushDefaultBranchTitle,
+        description: copy.defaultBranchDescription(branchLabel, copy.commitAndPushChangesSummary),
+        continueLabel: copy.continueCommitAndPushTo(branchLabel),
       };
     }
     return {
-      title: "Push to default branch?",
-      description: `This action will push local commits${suffix}`,
-      continueLabel: `Push to ${branchLabel}`,
+      title: copy.pushDefaultBranchTitle,
+      description: copy.defaultBranchDescription(branchLabel, copy.pushLocalCommitsSummary),
+      continueLabel: copy.continuePushTo(branchLabel),
     };
   }
 
   if (input.includesCommit) {
     return {
-      title: "Commit, push & create PR from default branch?",
-      description: `This action will commit, push, and create a PR${suffix}`,
-      continueLabel: `Commit, push & create PR`,
+      title: copy.commitPushCreatePrDefaultBranchTitle,
+      description: copy.defaultBranchDescription(branchLabel, copy.commitPushCreatePrSummary),
+      continueLabel: copy.continueCommitPushPr,
     };
   }
   return {
-    title: "Push & create PR from default branch?",
-    description: `This action will push local commits and create a PR${suffix}`,
-    continueLabel: "Push & create PR",
+    title: copy.pushCreatePrDefaultBranchTitle,
+    description: copy.defaultBranchDescription(branchLabel, copy.pushLocalCommitsCreatePrSummary),
+    continueLabel: copy.continuePushPr,
   };
 }
 

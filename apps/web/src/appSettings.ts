@@ -17,6 +17,7 @@ import {
   DEFAULT_USE_POINTER_CURSORS,
   normalizeAppearanceThemeConfig,
 } from "./lib/appearanceTheme";
+import { APP_LANGUAGE_OPTIONS, DEFAULT_APP_LANGUAGE, type AppLanguage } from "./appLanguage";
 import { CUSTOM_THEME_IDS } from "./lib/customThemes";
 import { isOpenRouterGuaranteedFreeSlug } from "./lib/openRouterModels";
 
@@ -31,6 +32,7 @@ export const DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX = 0;
 export const TIMESTAMP_FORMAT_OPTIONS = ["locale", "12-hour", "24-hour"] as const;
 export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
+export const DEFAULT_APP_LANGUAGE_SETTING: AppLanguage = DEFAULT_APP_LANGUAGE;
 export const APP_SERVICE_TIER_OPTIONS = [
   {
     value: "auto",
@@ -129,6 +131,9 @@ const AppSettingsSchema = Schema.Struct({
   ),
   codexServiceTier: AppServiceTierSchema.pipe(
     Schema.withConstructorDefault(() => Option.some("auto")),
+  ),
+  language: Schema.Literals(APP_LANGUAGE_OPTIONS).pipe(
+    Schema.withConstructorDefault(() => Option.some(DEFAULT_APP_LANGUAGE_SETTING)),
   ),
   timestampFormat: Schema.Literals(["locale", "12-hour", "24-hour"]).pipe(
     Schema.withConstructorDefault(() => Option.some(DEFAULT_TIMESTAMP_FORMAT)),

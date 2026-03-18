@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,6 +11,24 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (() => {
+        const root = document.documentElement;
+        try {
+          const raw = localStorage.getItem("cut3:app-settings:v1");
+          if (!raw) {
+            return;
+          }
+          const parsed = JSON.parse(raw);
+          if (parsed?.language === "fa") {
+            root.lang = "fa";
+            root.dir = "rtl";
+          }
+        } catch {
+          // Fall back to the default HTML attributes.
+        }
+      })();
+    </script>
     <title>CUT3</title>
   </head>
   <body>

@@ -132,6 +132,7 @@ import {
   resolvePlanFollowUpSubmission,
   stripDisplayedPlanMarkdown,
 } from "../proposedPlan";
+import { getPlanUiCopy } from "../planUiCopy";
 import { truncateTitle } from "../truncateTitle";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -251,6 +252,7 @@ import {
   type AppServiceTier,
   useAppSettings,
 } from "../appSettings";
+import { getAppLanguageDetails, type AppLanguage } from "../appLanguage";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -740,6 +742,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const { settings, updateSettings } = useAppSettings();
+  const planCopy = useMemo(() => getPlanUiCopy(settings.language), [settings.language]);
+  const chatCopy = useMemo(() => getChatSurfaceCopy(settings.language), [settings.language]);
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
   const rawSearch = useSearch({
@@ -1719,10 +1723,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!latestTurnHasToolActivity) return null;
 
     const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
-    return elapsed ? `Worked for ${elapsed}` : null;
+    return elapsed ? chatCopy.workedFor(elapsed) : null;
   }, [
     activeLatestTurn?.completedAt,
     activeLatestTurn?.startedAt,
+    chatCopy,
     latestTurnHasToolActivity,
     latestTurnSettled,
   ]);
@@ -2964,7 +2969,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (pendingUserInputs.length > 0) {
       toastManager.add({
         type: "error",
-        title: "Attach images after answering plan questions.",
+        title: chatCopy.attachImagesAfterPlanQuestions,
       });
       return;
     }
@@ -4574,6 +4579,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       <ProviderModelPicker
                         activeThread={activeThread ?? null}
                         compact={isComposerFooterCompact}
+                        language={settings.language}
                         provider={selectedProvider}
                         providerPickerKind={selectedProviderPickerKind}
                         model={selectedModelForPickerWithCustomFallback}
@@ -4658,7 +4664,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           >
                             <BotIcon />
                             <span className="sr-only sm:not-sr-only">
-                              {interactionMode === "plan" ? "Plan" : "Chat"}
+                              {interactionMode === "plan" ? planCopy.planLabel : chatCopy.chatLabel}
                             </span>
                           </Button>
 
@@ -4679,13 +4685,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             }
                             title={
                               runtimeMode === "full-access"
-                                ? "Full access — click to require approvals"
-                                : "Approval required — click for full access"
+                                ? chatCopy.fullAccessTooltip
+                                : chatCopy.approvalRequiredTooltip
                             }
                           >
                             {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
                             <span className="sr-only sm:not-sr-only">
-                              {runtimeMode === "full-access" ? "Full access" : "Supervised"}
+                              {runtimeMode === "full-access"
+                                ? chatCopy.fullAccess
+                                : chatCopy.supervised}
                             </span>
                           </Button>
 
@@ -4706,10 +4714,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 size="sm"
                                 type="button"
                                 onClick={togglePlanSidebar}
-                                title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+                                title={
+                                  planSidebarOpen
+                                    ? planCopy.hidePlanSidebar
+                                    : planCopy.showPlanSidebar
+                                }
                               >
                                 <ListTodoIcon />
-                                <span className="sr-only sm:not-sr-only">Plan</span>
+                                <span className="sr-only sm:not-sr-only">{planCopy.planLabel}</span>
                               </Button>
                             </>
                           ) : null}
@@ -4724,7 +4736,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     >
                       {isPreparingWorktree ? (
                         <span className="text-muted-foreground/70 text-xs">
-                          Preparing worktree...
+                          {chatCopy.preparingWorktree}
                         </span>
                       ) : null}
                       {activePendingProgress ? (
@@ -4737,7 +4749,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               onClick={onPreviousActivePendingUserInputQuestion}
                               disabled={activePendingIsResponding}
                             >
-                              Previous
+                              {chatCopy.previous}
                             </Button>
                           ) : null}
                           <Button
@@ -4752,10 +4764,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             }
                           >
                             {activePendingIsResponding
-                              ? "Submitting..."
+                              ? chatCopy.submitting
                               : activePendingProgress.isLastQuestion
-                                ? "Submit answers"
-                                : "Next question"}
+                                ? chatCopy.submitAnswers
+                                : chatCopy.nextQuestion}
                           </Button>
                         </div>
                       ) : phase === "running" ? (
@@ -4763,7 +4775,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           type="button"
                           className="app-interactive-motion flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 motion-reduce:hover:scale-100 sm:h-8 sm:w-8"
                           onClick={() => void onInterrupt()}
-                          aria-label="Stop generation"
+                          aria-label={chatCopy.stopGeneration}
                         >
                           <svg
                             width="12"
@@ -5821,12 +5833,16 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
   cwd: string | undefined;
   workspaceRoot: string | undefined;
 }) {
+  const {
+    settings: { language },
+  } = useAppSettings();
+  const planCopy = getPlanUiCopy(language);
   const [expanded, setExpanded] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const savePathInputId = useId();
-  const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
+  const title = proposedPlanTitle(planMarkdown) ?? planCopy.proposedPlanFallbackTitle;
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
@@ -5844,8 +5860,8 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
     if (!workspaceRoot) {
       toastManager.add({
         type: "error",
-        title: "Workspace path is unavailable",
-        description: "This thread does not have a workspace path to save into.",
+        title: planCopy.workspacePathUnavailable,
+        description: planCopy.workspacePathUnavailableDescription,
       });
       return;
     }
@@ -5862,7 +5878,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
     if (!relativePath) {
       toastManager.add({
         type: "warning",
-        title: "Enter a workspace path",
+        title: planCopy.enterWorkspacePath,
       });
       return;
     }
@@ -5878,15 +5894,15 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
         setIsSaveDialogOpen(false);
         toastManager.add({
           type: "success",
-          title: "Plan saved to workspace",
+          title: planCopy.planSavedToWorkspace,
           description: result.relativePath,
         });
       })
       .catch((error) => {
         toastManager.add({
           type: "error",
-          title: "Could not save plan",
-          description: error instanceof Error ? error.message : "An error occurred while saving.",
+          title: planCopy.couldNotSavePlan,
+          description: error instanceof Error ? error.message : planCopy.genericSaveError,
         });
       })
       .then(
@@ -5903,19 +5919,19 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
     <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
+          <Badge variant="secondary">{planCopy.planLabel}</Badge>
           <p className="truncate text-sm font-medium text-foreground">{title}</p>
         </div>
         <Menu>
           <MenuTrigger
-            render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
+            render={<Button aria-label={planCopy.planActions} size="icon-xs" variant="outline" />}
           >
             <EllipsisIcon aria-hidden="true" className="size-4" />
           </MenuTrigger>
           <MenuPopup align="end">
-            <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
+            <MenuItem onClick={handleDownload}>{planCopy.downloadAsMarkdown}</MenuItem>
             <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
-              Save to workspace
+              {planCopy.saveToWorkspace}
             </MenuItem>
           </MenuPopup>
         </Menu>
@@ -5939,7 +5955,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
             >
-              {expanded ? "Collapse plan" : "Expand plan"}
+              {expanded ? planCopy.collapsePlan : planCopy.expandPlan}
             </Button>
           </div>
         ) : null}
@@ -5955,16 +5971,19 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
       >
         <DialogPopup className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Save plan to workspace</DialogTitle>
+            <DialogTitle>{planCopy.savePlanToWorkspace}</DialogTitle>
             <DialogDescription>
-              Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+              {planCopy.savePlanDialogDescription(
+                workspaceRoot ?? (language === "fa" ? "فضای کاری" : "the workspace"),
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-3">
             <label htmlFor={savePathInputId} className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Workspace path</span>
+              <span className="text-xs font-medium text-foreground">{planCopy.workspacePath}</span>
               <Input
                 id={savePathInputId}
+                dir="ltr"
                 value={savePath}
                 onChange={(event) => setSavePath(event.target.value)}
                 placeholder={downloadFilename}
@@ -5980,14 +5999,14 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
               onClick={() => setIsSaveDialogOpen(false)}
               disabled={isSavingToWorkspace}
             >
-              Cancel
+              {planCopy.cancel}
             </Button>
             <Button
               size="sm"
               onClick={() => void handleSaveToWorkspace()}
               disabled={isSavingToWorkspace}
             >
-              {isSavingToWorkspace ? "Saving..." : "Save"}
+              {isSavingToWorkspace ? planCopy.saving : planCopy.save}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -6074,6 +6093,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
 }: MessagesTimelineProps) {
+  const {
+    settings: { language },
+  } = useAppSettings();
+  const chatCopy = getChatSurfaceCopy(language);
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
 
@@ -6543,8 +6566,8 @@ const MessagesTimeline = memo(function MessagesTimeline({
             </span>
             <span>
               {row.createdAt
-                ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working..."}
+                ? chatCopy.workingFor(formatWorkingTimer(row.createdAt, nowIso) ?? "0s")
+                : chatCopy.working}
             </span>
           </div>
         </div>
@@ -6555,9 +6578,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
   if (!hasMessages && !isWorking) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
+        <p className="text-sm text-muted-foreground/30">{chatCopy.sendMessageToStart}</p>
       </div>
     );
   }
@@ -6733,16 +6754,84 @@ function resolveModelForProviderPicker(
   return null;
 }
 
-function formatCopilotQuotaDate(iso: string): string {
+function formatCopilotQuotaDate(iso: string, language: AppLanguage): string {
   const parsed = Date.parse(iso);
   if (Number.isNaN(parsed)) {
-    return "soon";
+    return language === "fa" ? "به زودی" : "soon";
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getAppLanguageDetails(language).locale, {
     month: "short",
     day: "numeric",
     year: "numeric",
   }).format(new Date(parsed));
+}
+
+function getChatSurfaceCopy(language: AppLanguage) {
+  if (language === "fa") {
+    return {
+      chatLabel: "گفتگو",
+      fullAccess: "دسترسی کامل",
+      supervised: "نظارتی",
+      fullAccessTooltip: "دسترسی کامل فعال است؛ برای نیاز به تایید کلیک کنید",
+      approvalRequiredTooltip: "تایید لازم است؛ برای دسترسی کامل کلیک کنید",
+      preparingWorktree: "در حال آماده سازی worktree...",
+      previous: "قبلی",
+      submitting: "در حال ثبت...",
+      submitAnswers: "ثبت پاسخ ها",
+      nextQuestion: "سوال بعدی",
+      stopGeneration: "توقف تولید",
+      workedFor: (elapsed: string) => `مدت کار ${elapsed}`,
+      workingFor: (elapsed: string) => `در حال کار (${elapsed})`,
+      working: "در حال کار...",
+      sendMessageToStart: "برای شروع گفتگو یک پیام بفرستید.",
+      attachImagesAfterPlanQuestions: "تصاویر را بعد از پاسخ دادن به سوال های طرح پیوست کنید.",
+      moreComposerControls: "کنترل های بیشتر برای نوشتن پیام",
+      reasoning: "استدلال",
+      fastMode: "حالت سریع",
+      mode: "حالت",
+      access: "دسترسی",
+      comingSoon: "به زودی",
+      defaultSuffix: " (پیش فرض)",
+      low: "کم",
+      medium: "متوسط",
+      high: "زیاد",
+      extraHigh: "خیلی زیاد",
+      off: "خاموش",
+      on: "روشن",
+    };
+  }
+
+  return {
+    chatLabel: "Chat",
+    fullAccess: "Full access",
+    supervised: "Supervised",
+    fullAccessTooltip: "Full access — click to require approvals",
+    approvalRequiredTooltip: "Approval required — click for full access",
+    preparingWorktree: "Preparing worktree...",
+    previous: "Previous",
+    submitting: "Submitting...",
+    submitAnswers: "Submit answers",
+    nextQuestion: "Next question",
+    stopGeneration: "Stop generation",
+    workedFor: (elapsed: string) => `Worked for ${elapsed}`,
+    workingFor: (elapsed: string) => `Working for ${elapsed}`,
+    working: "Working...",
+    sendMessageToStart: "Send a message to start the conversation.",
+    attachImagesAfterPlanQuestions: "Attach images after answering plan questions.",
+    moreComposerControls: "More composer controls",
+    reasoning: "Reasoning",
+    fastMode: "Fast Mode",
+    mode: "Mode",
+    access: "Access",
+    comingSoon: "Coming soon",
+    defaultSuffix: " (default)",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    extraHigh: "Extra High",
+    off: "off",
+    on: "on",
+  };
 }
 
 type AvailableCopilotUsage = {
@@ -6778,14 +6867,22 @@ function isUnavailableCopilotUsage(
   return usage !== null && usage.status !== "available";
 }
 
-function renderCopilotUsageSummary(usage: ServerCopilotUsage | null, isLoading: boolean) {
+function renderCopilotUsageSummary(
+  usage: ServerCopilotUsage | null,
+  isLoading: boolean,
+  language: AppLanguage,
+) {
   if (isLoading && usage === null) {
     return (
       <div className="space-y-1 px-2 py-2.5">
         <div className="font-medium text-[11px] text-muted-foreground/85 uppercase tracking-[0.12em]">
-          GitHub Copilot billing
+          {language === "fa" ? "مصرف GitHub Copilot" : "GitHub Copilot billing"}
         </div>
-        <div className="text-sm">Loading premium requests…</div>
+        <div className="text-sm">
+          {language === "fa"
+            ? "در حال بارگذاری درخواست های پریمیوم..."
+            : "Loading premium requests..."}
+        </div>
       </div>
     );
   }
@@ -6798,9 +6895,11 @@ function renderCopilotUsageSummary(usage: ServerCopilotUsage | null, isLoading: 
     return (
       <div className="space-y-1 px-2 py-2.5">
         <div className="font-medium text-[11px] text-muted-foreground/85 uppercase tracking-[0.12em]">
-          GitHub Copilot billing
+          {language === "fa" ? "مصرف GitHub Copilot" : "GitHub Copilot billing"}
         </div>
-        <div className="text-sm">Premium requests unavailable</div>
+        <div className="text-sm">
+          {language === "fa" ? "درخواست های پریمیوم در دسترس نیست" : "Premium requests unavailable"}
+        </div>
         <div className="text-muted-foreground/80 text-xs leading-relaxed">{usage.message}</div>
       </div>
     );
@@ -6815,17 +6914,23 @@ function renderCopilotUsageSummary(usage: ServerCopilotUsage | null, isLoading: 
   return (
     <div className="space-y-1 px-2 py-2.5">
       <div className="font-medium text-[11px] text-muted-foreground/85 uppercase tracking-[0.12em]">
-        Usage remaining
+        {language === "fa" ? "مصرف باقی مانده" : "Usage remaining"}
       </div>
-      <div className="text-sm font-medium">Premium requests</div>
+      <div className="text-sm font-medium">
+        {language === "fa" ? "درخواست های پریمیوم" : "Premium requests"}
+      </div>
       <div className="text-muted-foreground/90 text-xs">
-        {`${usage.remaining} / ${usage.entitlement} left · resets ${formatCopilotQuotaDate(usage.resetAt)}`}
+        {language === "fa"
+          ? `${usage.remaining} / ${usage.entitlement} باقی مانده · بازنشانی در ${formatCopilotQuotaDate(usage.resetAt, language)}`
+          : `${usage.remaining} / ${usage.entitlement} left · resets ${formatCopilotQuotaDate(usage.resetAt, language)}`}
       </div>
       <div className="text-muted-foreground/75 text-[11px]">
         {[planLabel, usage.login].filter(Boolean).join(" · ")}
       </div>
       <div className="pt-1 text-muted-foreground/80 text-[11px] leading-relaxed">
-        Per-request overage below is estimated after included premium requests are exhausted.
+        {language === "fa"
+          ? "برآورد هزینه اضافه برای هر درخواست پس از تمام شدن درخواست های پریمیوم شامل شده نمایش داده می شود."
+          : "Per-request overage below is estimated after included premium requests are exhausted."}
       </div>
     </div>
   );
@@ -7009,6 +7114,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   activeThread: Thread | null;
   provider: ProviderKind;
   providerPickerKind: AvailableProviderPickerKind;
+  language: AppLanguage;
   model: ModelSlug;
   lockedProvider: ProviderKind | null;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
@@ -7148,6 +7254,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                     {renderCopilotUsageSummary(
                       copilotUsageQuery.data ?? null,
                       copilotUsageQuery.isLoading,
+                      props.language,
                     )}
                     <MenuDivider />
                   </>
@@ -7206,7 +7313,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               />
               <span>{option.label}</span>
               <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                Coming soon
+                {getChatSurfaceCopy(props.language).comingSoon}
               </span>
             </MenuItem>
           );
@@ -7219,7 +7326,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
               <span>{option.label}</span>
               <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                Coming soon
+                {getChatSurfaceCopy(props.language).comingSoon}
               </span>
             </MenuItem>
           );
@@ -7245,12 +7352,17 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
+  const {
+    settings: { language },
+  } = useAppSettings();
+  const chatCopy = getChatSurfaceCopy(language);
+  const planCopy = getPlanUiCopy(language);
   const defaultReasoningEffort = getDefaultReasoningEffort(props.selectedProvider);
   const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
+    low: chatCopy.low,
+    medium: chatCopy.medium,
+    high: chatCopy.high,
+    xhigh: chatCopy.extraHigh,
   };
 
   return (
@@ -7261,7 +7373,7 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
             size="sm"
             variant="ghost"
             className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
-            aria-label="More composer controls"
+            aria-label={chatCopy.moreComposerControls}
           />
         }
       >
@@ -7271,7 +7383,9 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
         {props.selectedEffort != null ? (
           <>
             <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                {chatCopy.reasoning}
+              </div>
               <MenuRadioGroup
                 value={props.selectedEffort}
                 onValueChange={(value) => {
@@ -7284,7 +7398,7 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
                 {props.reasoningOptions.map((effort) => (
                   <MenuRadioItem key={effort} value={effort}>
                     {reasoningLabelByOption[effort]}
-                    {effort === defaultReasoningEffort ? " (default)" : ""}
+                    {effort === defaultReasoningEffort ? chatCopy.defaultSuffix : ""}
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
@@ -7294,7 +7408,7 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
                 <MenuDivider />
                 <MenuGroup>
                   <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-                    Fast Mode
+                    {chatCopy.fastMode}
                   </div>
                   <MenuRadioGroup
                     value={props.selectedCodexFastModeEnabled ? "on" : "off"}
@@ -7302,8 +7416,8 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
                       props.onCodexFastModeChange(value === "on");
                     }}
                   >
-                    <MenuRadioItem value="off">off</MenuRadioItem>
-                    <MenuRadioItem value="on">on</MenuRadioItem>
+                    <MenuRadioItem value="off">{chatCopy.off}</MenuRadioItem>
+                    <MenuRadioItem value="on">{chatCopy.on}</MenuRadioItem>
                   </MenuRadioGroup>
                 </MenuGroup>
               </>
@@ -7312,7 +7426,9 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
           </>
         ) : null}
         <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+            {chatCopy.mode}
+          </div>
           <MenuRadioGroup
             value={props.interactionMode}
             onValueChange={(value) => {
@@ -7320,13 +7436,15 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
               props.onToggleInteractionMode();
             }}
           >
-            <MenuRadioItem value="default">Chat</MenuRadioItem>
-            <MenuRadioItem value="plan">Plan</MenuRadioItem>
+            <MenuRadioItem value="default">{chatCopy.chatLabel}</MenuRadioItem>
+            <MenuRadioItem value="plan">{planCopy.planLabel}</MenuRadioItem>
           </MenuRadioGroup>
         </MenuGroup>
         <MenuDivider />
         <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+            {chatCopy.access}
+          </div>
           <MenuRadioGroup
             value={props.runtimeMode}
             onValueChange={(value) => {
@@ -7334,8 +7452,8 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
               props.onToggleRuntimeMode();
             }}
           >
-            <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-            <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+            <MenuRadioItem value="approval-required">{chatCopy.supervised}</MenuRadioItem>
+            <MenuRadioItem value="full-access">{chatCopy.fullAccess}</MenuRadioItem>
           </MenuRadioGroup>
         </MenuGroup>
         {props.activePlan ? (
@@ -7343,7 +7461,7 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
             <MenuDivider />
             <MenuItem onClick={props.onTogglePlanSidebar}>
               <ListTodoIcon className="size-4 shrink-0" />
-              {props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+              {props.planSidebarOpen ? planCopy.hidePlanSidebar : planCopy.showPlanSidebar}
             </MenuItem>
           </>
         ) : null}
@@ -7360,12 +7478,16 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
   onEffortChange: (effort: CodexReasoningEffort) => void;
   onFastModeChange?: (enabled: boolean) => void;
 }) {
+  const {
+    settings: { language },
+  } = useAppSettings();
+  const chatCopy = getChatSurfaceCopy(language);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
+    low: chatCopy.low,
+    medium: chatCopy.medium,
+    high: chatCopy.high,
+    xhigh: chatCopy.extraHigh,
   };
   const triggerLabel = [
     reasoningLabelByOption[props.effort],
@@ -7395,7 +7517,9 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
       </MenuTrigger>
       <MenuPopup align="start">
         <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+            {chatCopy.reasoning}
+          </div>
           <MenuRadioGroup
             value={props.effort}
             onValueChange={(value) => {
@@ -7408,7 +7532,7 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
             {props.options.map((effort) => (
               <MenuRadioItem key={effort} value={effort}>
                 {reasoningLabelByOption[effort]}
-                {effort === props.defaultReasoningEffort ? " (default)" : ""}
+                {effort === props.defaultReasoningEffort ? chatCopy.defaultSuffix : ""}
               </MenuRadioItem>
             ))}
           </MenuRadioGroup>
@@ -7417,15 +7541,17 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
           <>
             <MenuDivider />
             <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                {chatCopy.fastMode}
+              </div>
               <MenuRadioGroup
                 value={props.fastModeEnabled ? "on" : "off"}
                 onValueChange={(value) => {
                   props.onFastModeChange?.(value === "on");
                 }}
               >
-                <MenuRadioItem value="off">off</MenuRadioItem>
-                <MenuRadioItem value="on">on</MenuRadioItem>
+                <MenuRadioItem value="off">{chatCopy.off}</MenuRadioItem>
+                <MenuRadioItem value="on">{chatCopy.on}</MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
           </>

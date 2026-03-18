@@ -172,6 +172,48 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const navigate = useNavigate();
   const { resolvedTheme, activeCustomThemeId } = useTheme();
   const { settings } = useAppSettings();
+  const diffCopy = useMemo(
+    () =>
+      settings.language === "fa"
+        ? {
+            couldNotLoadCheckpointDiff: "بارگذاری این diff نقطه ثبت انجام نشد.",
+            scrollTurnListLeft: "اسکرول فهرست نوبت ها به چپ",
+            scrollTurnListRight: "اسکرول فهرست نوبت ها به راست",
+            allTurns: "همه نوبت ها",
+            turn: "نوبت",
+            stackedDiffView: "نمایش diff انباشته",
+            splitDiffView: "نمایش diff دو ستونه",
+            selectThreadToInspect: "برای بررسی diff نوبت ها یک رشته را انتخاب کنید.",
+            gitRepoRequired: "diff نوبت ها در دسترس نیست چون این پروژه یک مخزن git نیست.",
+            noCompletedTurnsYet: "هنوز نوبت تکمیل شده ای وجود ندارد.",
+            retryOrSwitch: "این درخواست diff را دوباره امتحان کنید یا به نوبت دیگری بروید.",
+            retrying: "در حال تلاش دوباره...",
+            retryDiff: "تلاش دوباره برای diff",
+            loadingCheckpointDiff: "در حال بارگذاری diff نقطه ثبت...",
+            noNetChanges: "در این انتخاب تغییر خالصی وجود ندارد.",
+            noPatchAvailable: "برای این انتخاب patchی در دسترس نیست.",
+          }
+        : {
+            couldNotLoadCheckpointDiff: "Could not load this checkpoint diff.",
+            scrollTurnListLeft: "Scroll turn list left",
+            scrollTurnListRight: "Scroll turn list right",
+            allTurns: "All turns",
+            turn: "Turn",
+            stackedDiffView: "Stacked diff view",
+            splitDiffView: "Split diff view",
+            selectThreadToInspect: "Select a thread to inspect turn diffs.",
+            gitRepoRequired:
+              "Turn diffs are unavailable because this project is not a git repository.",
+            noCompletedTurnsYet: "No completed turns yet.",
+            retryOrSwitch: "Retry this diff request or switch to another turn.",
+            retrying: "Retrying...",
+            retryDiff: "Retry diff",
+            loadingCheckpointDiff: "Loading checkpoint diff...",
+            noNetChanges: "No net changes in this selection.",
+            noPatchAvailable: "No patch available for this selection.",
+          },
+    [settings.language],
+  );
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const patchViewportRef = useRef<HTMLDivElement>(null);
   const turnStripRef = useRef<HTMLDivElement>(null);
@@ -279,7 +321,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     : activeCheckpointDiffQuery.data?.diff;
   const isLoadingCheckpointDiff = activeCheckpointDiffQuery.isLoading;
   const checkpointDiffError = activeCheckpointDiffQuery.error
-    ? "Could not load this checkpoint diff."
+    ? diffCopy.couldNotLoadCheckpointDiff
     : null;
   const checkpointDiffErrorDetail = getCheckpointDiffErrorDetail(activeCheckpointDiffQuery.error);
   const isRetryingCheckpointDiff = activeCheckpointDiffQuery.isFetching && !isLoadingCheckpointDiff;
@@ -427,7 +469,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           )}
           onClick={() => scrollTurnStripBy(-180)}
           disabled={!canScrollTurnStripLeft}
-          aria-label="Scroll turn list left"
+          aria-label={diffCopy.scrollTurnListLeft}
         >
           <ChevronLeftIcon className="size-3.5" />
         </button>
@@ -441,7 +483,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           )}
           onClick={() => scrollTurnStripBy(180)}
           disabled={!canScrollTurnStripRight}
-          aria-label="Scroll turn list right"
+          aria-label={diffCopy.scrollTurnListRight}
         >
           <ChevronRightIcon className="size-3.5" />
         </button>
@@ -464,7 +506,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
               )}
             >
-              <div className="text-[10px] leading-tight font-medium">All turns</div>
+              <div className="text-[10px] leading-tight font-medium">{diffCopy.allTurns}</div>
             </div>
           </button>
           {orderedTurnDiffSummaries.map((summary) => (
@@ -486,7 +528,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
               >
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] leading-tight font-medium">
-                    Turn{" "}
+                    {diffCopy.turn}{" "}
                     {summary.checkpointTurnCount ??
                       inferredCheckpointTurnCountByTurnId[summary.turnId] ??
                       "?"}
@@ -512,10 +554,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           }
         }}
       >
-        <Toggle aria-label="Stacked diff view" value="stacked">
+        <Toggle aria-label={diffCopy.stackedDiffView} value="stacked">
           <Rows3Icon className="size-3" />
         </Toggle>
-        <Toggle aria-label="Split diff view" value="split">
+        <Toggle aria-label={diffCopy.splitDiffView} value="split">
           <Columns2Icon className="size-3" />
         </Toggle>
       </ToggleGroup>
@@ -526,15 +568,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     <DiffPanelShell mode={mode} header={headerRow}>
       {!activeThread ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          Select a thread to inspect turn diffs.
+          {diffCopy.selectThreadToInspect}
         </div>
       ) : !isGitRepo ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          Turn diffs are unavailable because this project is not a git repository.
+          {diffCopy.gitRepoRequired}
         </div>
       ) : orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          No completed turns yet.
+          {diffCopy.noCompletedTurnsYet}
         </div>
       ) : (
         <>
@@ -549,9 +591,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   role="alert"
                 >
                   <p className="text-sm font-medium text-destructive">{checkpointDiffError}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Retry this diff request or switch to another turn.
-                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{diffCopy.retryOrSwitch}</p>
                   {checkpointDiffErrorDetail ? (
                     <p className="mt-2 text-xs text-muted-foreground/90">
                       {checkpointDiffErrorDetail}
@@ -566,21 +606,17 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                       }}
                       disabled={isRetryingCheckpointDiff}
                     >
-                      {isRetryingCheckpointDiff ? "Retrying..." : "Retry diff"}
+                      {isRetryingCheckpointDiff ? diffCopy.retrying : diffCopy.retryDiff}
                     </Button>
                   </div>
                 </div>
               </div>
             ) : !renderablePatch ? (
               isLoadingCheckpointDiff ? (
-                <DiffPanelLoadingState label="Loading checkpoint diff..." />
+                <DiffPanelLoadingState label={diffCopy.loadingCheckpointDiff} />
               ) : (
                 <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
-                  <p>
-                    {hasNoNetChanges
-                      ? "No net changes in this selection."
-                      : "No patch available for this selection."}
-                  </p>
+                  <p>{hasNoNetChanges ? diffCopy.noNetChanges : diffCopy.noPatchAvailable}</p>
                 </div>
               )
             ) : renderablePatch.kind === "files" ? (

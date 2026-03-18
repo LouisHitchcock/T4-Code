@@ -37,6 +37,7 @@ import {
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useAppSettings } from "../appSettings";
+import { getAppLanguageDetails, type AppLanguage } from "../appLanguage";
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_VERSION } from "../branding";
 import { resolveServerHttpUrl } from "../lib/serverUrl";
@@ -96,24 +97,204 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
 
-function formatRelativeTime(iso: string): string {
+function getSidebarCopy(language: AppLanguage) {
+  if (language === "fa") {
+    return {
+      genericError: "خطایی رخ داد.",
+      unexpectedError: "خطایی غیرمنتظره رخ داد.",
+      linkOpeningUnavailable: "باز کردن پیوند در دسترس نیست.",
+      unableToOpenPrLink: "باز کردن پیوند PR ممکن نشد",
+      failedToAddProject: "افزودن پروژه انجام نشد",
+      addProjectUnexpectedError: "هنگام افزودن پروژه خطایی رخ داد.",
+      threadTitleCannotBeEmpty: "عنوان رشته نمی تواند خالی باشد",
+      failedToRenameThread: "تغییر نام رشته انجام نشد",
+      keepingOrphanedWorktree: "worktree یتیم حفظ شد",
+      orphanedWorktreeKeptForSafety: (path: string) =>
+        `CUT3 نتوانست بررسی کند که ${path} تغییرات ثبت نشده دارد یا نه، بنابراین worktree برای ایمنی حفظ می شود.`,
+      orphanedWorktreeWithChangesPrompt: (path: string) =>
+        [
+          "این رشته تنها رشته متصل به این worktree است:",
+          path,
+          "",
+          "این worktree تغییرات ثبت نشده دارد.",
+          "می خواهید آن را هم حذف کنید و این تغییرات برای همیشه دور ریخته شود؟",
+        ].join("\n"),
+      orphanedWorktreePrompt: (path: string) =>
+        ["این رشته تنها رشته متصل به این worktree است:", path, "", "این worktree هم حذف شود؟"].join(
+          "\n",
+        ),
+      unknownWorktreeRemoveError: "خطای نامشخص در حذف worktree.",
+      threadDeletedWorktreeRemovalFailed: "رشته حذف شد، اما حذف worktree انجام نشد",
+      couldNotRemoveWorktree: (path: string, message: string) => `حذف ${path} ممکن نشد. ${message}`,
+      threadIdCopied: "شناسه رشته کپی شد",
+      failedToCopyThreadId: "کپی شناسه رشته انجام نشد",
+      renameThread: "تغییر نام رشته",
+      markUnread: "علامت گذاری به عنوان خوانده نشده",
+      copyThreadId: "کپی شناسه رشته",
+      delete: "حذف",
+      deleteThreadPrompt: (title: string) => `رشته "${title}" حذف شود؟`,
+      deleteThreadWarning: "این کار تاریخچه گفتگوی این رشته را برای همیشه پاک می کند.",
+      deleteThreadsPrompt: (count: number) =>
+        count === 1 ? "این رشته حذف شود؟" : `${count} رشته حذف شوند؟`,
+      deleteThreadsWarning: "این کار تاریخچه گفتگوی این رشته ها را برای همیشه پاک می کند.",
+      removeProject: "حذف پروژه",
+      projectIsNotEmpty: "پروژه خالی نیست",
+      deleteProjectThreadsFirst: "پیش از حذف پروژه، همه رشته های این پروژه را حذف کنید.",
+      removeProjectPrompt: (name: string) => `پروژه "${name}" حذف شود؟`,
+      unknownProjectRemoveError: "خطای نامشخص در حذف پروژه.",
+      failedToRemoveProject: (name: string) => `حذف "${name}" انجام نشد`,
+      versionLabel: "نسخه",
+      intelBuildOnAppleSilicon: "نسخه اینتل روی Apple Silicon",
+      downloadArmBuild: "دانلود نسخه ARM",
+      installArmBuild: "نصب نسخه ARM",
+      projects: "پروژه ها",
+      addProject: "افزودن پروژه",
+      pickingFolder: "در حال انتخاب پوشه...",
+      browseForFolder: "انتخاب پوشه",
+      adding: "در حال افزودن...",
+      add: "افزودن",
+      cancel: "لغو",
+      noProjectsYet: "هنوز پروژه ای وجود ندارد",
+      back: "بازگشت",
+      settings: "تنظیمات",
+      createNewThreadInProject: (name: string) => `ساخت رشته جدید در ${name}`,
+      newThread: (shortcutLabel: string | null) =>
+        shortcutLabel ? `رشته جدید (${shortcutLabel})` : "رشته جدید",
+      showMore: "نمایش بیشتر",
+      showLess: "نمایش کمتر",
+      terminalProcessRunning: "پردازش ترمینال در حال اجرا",
+      prOpen: "PR باز",
+      prClosed: "PR بسته",
+      prMerged: "PR ادغام شده",
+      prOpenTooltip: (number: number, title: string) => `#${number} PR باز: ${title}`,
+      prClosedTooltip: (number: number, title: string) => `#${number} PR بسته: ${title}`,
+      prMergedTooltip: (number: number, title: string) => `#${number} PR ادغام شده: ${title}`,
+      pendingApproval: "در انتظار تایید",
+      awaitingInput: "در انتظار ورودی",
+      working: "در حال کار",
+      connecting: "در حال اتصال",
+      completed: "تکمیل شد",
+      planReady: "طرح آماده است",
+      updateAvailable: "به روزرسانی در دسترس است",
+      updateDownloaded: "به روزرسانی دانلود شد",
+      restartToInstallUpdate: "برای نصب، برنامه را از دکمه به روزرسانی دوباره راه اندازی کنید.",
+      couldNotDownloadUpdate: "دانلود به روزرسانی انجام نشد",
+      couldNotStartUpdateDownload: "شروع دانلود به روزرسانی انجام نشد",
+      couldNotInstallUpdate: "نصب به روزرسانی انجام نشد",
+    };
+  }
+
+  return {
+    genericError: "An error occurred.",
+    unexpectedError: "An unexpected error occurred.",
+    linkOpeningUnavailable: "Link opening is unavailable.",
+    unableToOpenPrLink: "Unable to open PR link",
+    failedToAddProject: "Failed to add project",
+    addProjectUnexpectedError: "An error occurred while adding the project.",
+    threadTitleCannotBeEmpty: "Thread title cannot be empty",
+    failedToRenameThread: "Failed to rename thread",
+    keepingOrphanedWorktree: "Keeping orphaned worktree",
+    orphanedWorktreeKeptForSafety: (path: string) =>
+      `CUT3 could not verify whether ${path} has uncommitted changes, so the worktree will be kept for safety.`,
+    orphanedWorktreeWithChangesPrompt: (path: string) =>
+      [
+        "This thread is the only one linked to this worktree:",
+        path,
+        "",
+        "This worktree has uncommitted changes.",
+        "Delete it too and permanently discard those changes?",
+      ].join("\n"),
+    orphanedWorktreePrompt: (path: string) =>
+      [
+        "This thread is the only one linked to this worktree:",
+        path,
+        "",
+        "Delete the worktree too?",
+      ].join("\n"),
+    unknownWorktreeRemoveError: "Unknown error removing worktree.",
+    threadDeletedWorktreeRemovalFailed: "Thread deleted, but worktree removal failed",
+    couldNotRemoveWorktree: (path: string, message: string) =>
+      `Could not remove ${path}. ${message}`,
+    threadIdCopied: "Thread ID copied",
+    failedToCopyThreadId: "Failed to copy thread ID",
+    renameThread: "Rename thread",
+    markUnread: "Mark unread",
+    copyThreadId: "Copy Thread ID",
+    delete: "Delete",
+    deleteThreadPrompt: (title: string) => `Delete thread "${title}"?`,
+    deleteThreadWarning: "This permanently clears conversation history for this thread.",
+    deleteThreadsPrompt: (count: number) => `Delete ${count} thread${count === 1 ? "" : "s"}?`,
+    deleteThreadsWarning: "This permanently clears conversation history for these threads.",
+    removeProject: "Remove project",
+    projectIsNotEmpty: "Project is not empty",
+    deleteProjectThreadsFirst: "Delete all threads in this project before removing it.",
+    removeProjectPrompt: (name: string) => `Remove project "${name}"?`,
+    unknownProjectRemoveError: "Unknown error removing project.",
+    failedToRemoveProject: (name: string) => `Failed to remove "${name}"`,
+    versionLabel: "Version",
+    intelBuildOnAppleSilicon: "Intel build on Apple Silicon",
+    downloadArmBuild: "Download ARM build",
+    installArmBuild: "Install ARM build",
+    projects: "Projects",
+    addProject: "Add project",
+    pickingFolder: "Picking folder...",
+    browseForFolder: "Browse for folder",
+    adding: "Adding...",
+    add: "Add",
+    cancel: "Cancel",
+    noProjectsYet: "No projects yet",
+    back: "Back",
+    settings: "Settings",
+    createNewThreadInProject: (name: string) => `Create new thread in ${name}`,
+    newThread: (shortcutLabel: string | null) =>
+      shortcutLabel ? `New thread (${shortcutLabel})` : "New thread",
+    showMore: "Show more",
+    showLess: "Show less",
+    terminalProcessRunning: "Terminal process running",
+    prOpen: "PR open",
+    prClosed: "PR closed",
+    prMerged: "PR merged",
+    prOpenTooltip: (number: number, title: string) => `#${number} PR open: ${title}`,
+    prClosedTooltip: (number: number, title: string) => `#${number} PR closed: ${title}`,
+    prMergedTooltip: (number: number, title: string) => `#${number} PR merged: ${title}`,
+    pendingApproval: "Pending Approval",
+    awaitingInput: "Awaiting Input",
+    working: "Working",
+    connecting: "Connecting",
+    completed: "Completed",
+    planReady: "Plan Ready",
+    updateAvailable: "Update available",
+    updateDownloaded: "Update downloaded",
+    restartToInstallUpdate: "Restart the app from the update button to install it.",
+    couldNotDownloadUpdate: "Could not download update",
+    couldNotStartUpdateDownload: "Could not start update download",
+    couldNotInstallUpdate: "Could not install update",
+  };
+}
+
+function formatRelativeTime(iso: string, language: AppLanguage): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return language === "fa" ? "همین الان" : "just now";
+
+  const formatter = new Intl.RelativeTimeFormat(getAppLanguageDetails(language).locale, {
+    numeric: "auto",
+  });
+
+  if (minutes < 60) return formatter.format(-minutes, "minute");
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return formatter.format(-hours, "hour");
+  return formatter.format(-Math.floor(hours / 24), "day");
 }
 
 interface TerminalStatusIndicator {
-  label: "Terminal process running";
+  label: string;
   colorClass: string;
   pulse: boolean;
 }
 
 interface PrStatusIndicator {
-  label: "PR open" | "PR closed" | "PR merged";
+  label: string;
   colorClass: string;
   tooltip: string;
   url: string;
@@ -123,45 +304,69 @@ type ThreadPr = GitStatusResult["pr"];
 
 function terminalStatusFromRunningIds(
   runningTerminalIds: string[],
+  language: AppLanguage,
 ): TerminalStatusIndicator | null {
   if (runningTerminalIds.length === 0) {
     return null;
   }
+  const copy = getSidebarCopy(language);
   return {
-    label: "Terminal process running",
+    label: copy.terminalProcessRunning,
     colorClass: "text-teal-600 dark:text-teal-300/90",
     pulse: true,
   };
 }
 
-function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
+function prStatusIndicator(pr: ThreadPr, language: AppLanguage): PrStatusIndicator | null {
   if (!pr) return null;
+
+  const copy = getSidebarCopy(language);
 
   if (pr.state === "open") {
     return {
-      label: "PR open",
+      label: copy.prOpen,
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      tooltip: `#${pr.number} PR open: ${pr.title}`,
+      tooltip: copy.prOpenTooltip(pr.number, pr.title),
       url: pr.url,
     };
   }
   if (pr.state === "closed") {
     return {
-      label: "PR closed",
+      label: copy.prClosed,
       colorClass: "text-zinc-500 dark:text-zinc-400/80",
-      tooltip: `#${pr.number} PR closed: ${pr.title}`,
+      tooltip: copy.prClosedTooltip(pr.number, pr.title),
       url: pr.url,
     };
   }
   if (pr.state === "merged") {
     return {
-      label: "PR merged",
+      label: copy.prMerged,
       colorClass: "text-violet-600 dark:text-violet-300/90",
-      tooltip: `#${pr.number} PR merged: ${pr.title}`,
+      tooltip: copy.prMergedTooltip(pr.number, pr.title),
       url: pr.url,
     };
   }
   return null;
+}
+
+function localizeThreadStatusLabel(label: string, language: AppLanguage): string {
+  const copy = getSidebarCopy(language);
+  switch (label) {
+    case "Pending Approval":
+      return copy.pendingApproval;
+    case "Awaiting Input":
+      return copy.awaitingInput;
+    case "Working":
+      return copy.working;
+    case "Connecting":
+      return copy.connecting;
+    case "Completed":
+      return copy.completed;
+    case "Plan Ready":
+      return copy.planReady;
+    default:
+      return label;
+  }
 }
 
 function BrandMark() {
@@ -240,6 +445,7 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const { settings: appSettings } = useAppSettings();
+  const sidebarCopy = useMemo(() => getSidebarCopy(appSettings.language), [appSettings.language]);
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -338,27 +544,30 @@ export default function Sidebar() {
     return map;
   }, [threadGitStatusCwds, threadGitStatusQueries, threadGitTargets]);
 
-  const openPrLink = useCallback((event: React.MouseEvent<HTMLElement>, prUrl: string) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const openPrLink = useCallback(
+    (event: React.MouseEvent<HTMLElement>, prUrl: string) => {
+      event.preventDefault();
+      event.stopPropagation();
 
-    const api = readNativeApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Link opening is unavailable.",
-      });
-      return;
-    }
+      const api = readNativeApi();
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: sidebarCopy.linkOpeningUnavailable,
+        });
+        return;
+      }
 
-    void api.shell.openExternal(prUrl).catch((error) => {
-      toastManager.add({
-        type: "error",
-        title: "Unable to open PR link",
-        description: error instanceof Error ? error.message : "An error occurred.",
+      void api.shell.openExternal(prUrl).catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: sidebarCopy.unableToOpenPrLink,
+          description: error instanceof Error ? error.message : sidebarCopy.genericError,
+        });
       });
-    });
-  }, []);
+    },
+    [sidebarCopy.genericError, sidebarCopy.linkOpeningUnavailable, sidebarCopy.unableToOpenPrLink],
+  );
 
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
@@ -416,12 +625,12 @@ export default function Sidebar() {
         }).catch(() => undefined);
       } catch (error) {
         const description =
-          error instanceof Error ? error.message : "An error occurred while adding the project.";
+          error instanceof Error ? error.message : sidebarCopy.addProjectUnexpectedError;
         setIsAddingProject(false);
         if (shouldBrowseForProjectImmediately) {
           toastManager.add({
             type: "error",
-            title: "Failed to add project",
+            title: sidebarCopy.failedToAddProject,
             description,
           });
         } else {
@@ -438,6 +647,8 @@ export default function Sidebar() {
       projects,
       shouldBrowseForProjectImmediately,
       appSettings.defaultThreadEnvMode,
+      sidebarCopy.addProjectUnexpectedError,
+      sidebarCopy.failedToAddProject,
     ],
   );
 
@@ -491,7 +702,7 @@ export default function Sidebar() {
 
       const trimmed = newTitle.trim();
       if (trimmed.length === 0) {
-        toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
+        toastManager.add({ type: "warning", title: sidebarCopy.threadTitleCannotBeEmpty });
         finishRename();
         return;
       }
@@ -514,13 +725,17 @@ export default function Sidebar() {
       } catch (error) {
         toastManager.add({
           type: "error",
-          title: "Failed to rename thread",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          title: sidebarCopy.failedToRenameThread,
+          description: error instanceof Error ? error.message : sidebarCopy.genericError,
         });
       }
       finishRename();
     },
-    [],
+    [
+      sidebarCopy.failedToRenameThread,
+      sidebarCopy.genericError,
+      sidebarCopy.threadTitleCannotBeEmpty,
+    ],
   );
 
   /**
@@ -565,19 +780,10 @@ export default function Sidebar() {
 
           shouldDeleteWorktree = await api.dialogs.confirm(
             hasWorkingTreeChanges
-              ? [
-                  "This thread is the only one linked to this worktree:",
+              ? sidebarCopy.orphanedWorktreeWithChangesPrompt(
                   displayWorktreePath ?? orphanedWorktreePath,
-                  "",
-                  "This worktree has uncommitted changes.",
-                  "Delete it too and permanently discard those changes?",
-                ].join("\n")
-              : [
-                  "This thread is the only one linked to this worktree:",
-                  displayWorktreePath ?? orphanedWorktreePath,
-                  "",
-                  "Delete the worktree too?",
-                ].join("\n"),
+                )
+              : sidebarCopy.orphanedWorktreePrompt(displayWorktreePath ?? orphanedWorktreePath),
           );
           worktreeRemovalForce = hasWorkingTreeChanges;
         } catch (error) {
@@ -589,8 +795,10 @@ export default function Sidebar() {
           });
           toastManager.add({
             type: "info",
-            title: "Keeping orphaned worktree",
-            description: `CUT3 could not verify whether ${displayWorktreePath ?? orphanedWorktreePath} has uncommitted changes, so the worktree will be kept for safety.`,
+            title: sidebarCopy.keepingOrphanedWorktree,
+            description: sidebarCopy.orphanedWorktreeKeptForSafety(
+              displayWorktreePath ?? orphanedWorktreePath,
+            ),
           });
         }
       }
@@ -647,7 +855,8 @@ export default function Sidebar() {
           force: worktreeRemovalForce,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error removing worktree.";
+        const message =
+          error instanceof Error ? error.message : sidebarCopy.unknownWorktreeRemoveError;
         console.error("Failed to remove orphaned worktree after thread deletion", {
           threadId,
           projectCwd: threadProject.cwd,
@@ -656,8 +865,11 @@ export default function Sidebar() {
         });
         toastManager.add({
           type: "error",
-          title: "Thread deleted, but worktree removal failed",
-          description: `Could not remove ${displayWorktreePath ?? orphanedWorktreePath}. ${message}`,
+          title: sidebarCopy.threadDeletedWorktreeRemovalFailed,
+          description: sidebarCopy.couldNotRemoveWorktree(
+            displayWorktreePath ?? orphanedWorktreePath,
+            message,
+          ),
         });
       }
     },
@@ -670,6 +882,7 @@ export default function Sidebar() {
       queryClient,
       removeWorktreeMutation,
       routeThreadId,
+      sidebarCopy,
       threads,
     ],
   );
@@ -678,15 +891,15 @@ export default function Sidebar() {
     onCopy: (ctx) => {
       toastManager.add({
         type: "success",
-        title: "Thread ID copied",
+        title: sidebarCopy.threadIdCopied,
         description: ctx.threadId,
       });
     },
     onError: (error) => {
       toastManager.add({
         type: "error",
-        title: "Failed to copy thread ID",
-        description: error instanceof Error ? error.message : "An error occurred.",
+        title: sidebarCopy.failedToCopyThreadId,
+        description: error instanceof Error ? error.message : sidebarCopy.genericError,
       });
     },
   });
@@ -696,10 +909,10 @@ export default function Sidebar() {
       if (!api) return;
       const clicked = await api.contextMenu.show(
         [
-          { id: "rename", label: "Rename thread" },
-          { id: "mark-unread", label: "Mark unread" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
-          { id: "delete", label: "Delete", destructive: true },
+          { id: "rename", label: sidebarCopy.renameThread },
+          { id: "mark-unread", label: sidebarCopy.markUnread },
+          { id: "copy-thread-id", label: sidebarCopy.copyThreadId },
+          { id: "delete", label: sidebarCopy.delete, destructive: true },
         ],
         position,
       );
@@ -724,10 +937,9 @@ export default function Sidebar() {
       if (clicked !== "delete") return;
       if (appSettings.confirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
-          [
-            `Delete thread "${thread.title}"?`,
-            "This permanently clears conversation history for this thread.",
-          ].join("\n"),
+          [sidebarCopy.deleteThreadPrompt(thread.title), sidebarCopy.deleteThreadWarning].join(
+            "\n",
+          ),
         );
         if (!confirmed) {
           return;
@@ -735,7 +947,14 @@ export default function Sidebar() {
       }
       await deleteThread(threadId);
     },
-    [appSettings.confirmThreadDelete, copyToClipboard, deleteThread, markThreadUnread, threads],
+    [
+      appSettings.confirmThreadDelete,
+      copyToClipboard,
+      deleteThread,
+      markThreadUnread,
+      sidebarCopy,
+      threads,
+    ],
   );
 
   const handleMultiSelectContextMenu = useCallback(
@@ -748,8 +967,8 @@ export default function Sidebar() {
 
       const clicked = await api.contextMenu.show(
         [
-          { id: "mark-unread", label: `Mark unread (${count})` },
-          { id: "delete", label: `Delete (${count})`, destructive: true },
+          { id: "mark-unread", label: `${sidebarCopy.markUnread} (${count})` },
+          { id: "delete", label: `${sidebarCopy.delete} (${count})`, destructive: true },
         ],
         position,
       );
@@ -766,10 +985,7 @@ export default function Sidebar() {
 
       if (appSettings.confirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
-          [
-            `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-            "This permanently clears conversation history for these threads.",
-          ].join("\n"),
+          [sidebarCopy.deleteThreadsPrompt(count), sidebarCopy.deleteThreadsWarning].join("\n"),
         );
         if (!confirmed) return;
       }
@@ -786,6 +1002,7 @@ export default function Sidebar() {
       deleteThread,
       markThreadUnread,
       removeFromSelection,
+      sidebarCopy,
       selectedThreadIds,
     ],
   );
@@ -830,7 +1047,7 @@ export default function Sidebar() {
       const api = readNativeApi();
       if (!api) return;
       const clicked = await api.contextMenu.show(
-        [{ id: "delete", label: "Remove project", destructive: true }],
+        [{ id: "delete", label: sidebarCopy.removeProject, destructive: true }],
         position,
       );
       if (clicked !== "delete") return;
@@ -842,13 +1059,13 @@ export default function Sidebar() {
       if (projectThreads.length > 0) {
         toastManager.add({
           type: "warning",
-          title: "Project is not empty",
-          description: "Delete all threads in this project before removing it.",
+          title: sidebarCopy.projectIsNotEmpty,
+          description: sidebarCopy.deleteProjectThreadsFirst,
         });
         return;
       }
 
-      const confirmed = await api.dialogs.confirm(`Remove project "${project.name}"?`);
+      const confirmed = await api.dialogs.confirm(sidebarCopy.removeProjectPrompt(project.name));
       if (!confirmed) return;
 
       try {
@@ -863,11 +1080,12 @@ export default function Sidebar() {
           projectId,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error removing project.";
+        const message =
+          error instanceof Error ? error.message : sidebarCopy.unknownProjectRemoveError;
         console.error("Failed to remove project", { projectId, error });
         toastManager.add({
           type: "error",
-          title: `Failed to remove "${project.name}"`,
+          title: sidebarCopy.failedToRemoveProject(project.name),
           description: message,
         });
       }
@@ -877,6 +1095,7 @@ export default function Sidebar() {
       clearProjectDraftThreadId,
       getDraftThreadByProjectId,
       projects,
+      sidebarCopy,
       threads,
     ],
   );
@@ -1005,8 +1224,8 @@ export default function Sidebar() {
   const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState);
 
   const desktopUpdateTooltip = desktopUpdateState
-    ? getDesktopUpdateButtonTooltip(desktopUpdateState)
-    : "Update available";
+    ? getDesktopUpdateButtonTooltip(desktopUpdateState, appSettings.language)
+    : sidebarCopy.updateAvailable;
 
   const desktopUpdateButtonDisabled = isDesktopUpdateButtonDisabled(desktopUpdateState);
   const desktopUpdateButtonAction = desktopUpdateState
@@ -1016,7 +1235,7 @@ export default function Sidebar() {
     isElectron && shouldShowArm64IntelBuildWarning(desktopUpdateState);
   const arm64IntelBuildWarningDescription =
     desktopUpdateState && showArm64IntelBuildWarning
-      ? getArm64IntelBuildWarningDescription(desktopUpdateState)
+      ? getArm64IntelBuildWarningDescription(desktopUpdateState, appSettings.language)
       : null;
   const desktopUpdateButtonInteractivityClasses = desktopUpdateButtonDisabled
     ? "cursor-not-allowed opacity-60"
@@ -1048,8 +1267,8 @@ export default function Sidebar() {
           if (result.completed) {
             toastManager.add({
               type: "success",
-              title: "Update downloaded",
-              description: "Restart the app from the update button to install it.",
+              title: sidebarCopy.updateDownloaded,
+              description: sidebarCopy.restartToInstallUpdate,
             });
           }
           if (!shouldToastDesktopUpdateActionResult(result)) return;
@@ -1057,15 +1276,15 @@ export default function Sidebar() {
           if (!actionError) return;
           toastManager.add({
             type: "error",
-            title: "Could not download update",
+            title: sidebarCopy.couldNotDownloadUpdate,
             description: actionError,
           });
         })
         .catch((error) => {
           toastManager.add({
             type: "error",
-            title: "Could not start update download",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+            title: sidebarCopy.couldNotStartUpdateDownload,
+            description: error instanceof Error ? error.message : sidebarCopy.unexpectedError,
           });
         });
       return;
@@ -1080,19 +1299,29 @@ export default function Sidebar() {
           if (!actionError) return;
           toastManager.add({
             type: "error",
-            title: "Could not install update",
+            title: sidebarCopy.couldNotInstallUpdate,
             description: actionError,
           });
         })
         .catch((error) => {
           toastManager.add({
             type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+            title: sidebarCopy.couldNotInstallUpdate,
+            description: error instanceof Error ? error.message : sidebarCopy.unexpectedError,
           });
         });
     }
-  }, [desktopUpdateButtonAction, desktopUpdateButtonDisabled, desktopUpdateState]);
+  }, [
+    desktopUpdateButtonAction,
+    desktopUpdateButtonDisabled,
+    desktopUpdateState,
+    sidebarCopy.couldNotDownloadUpdate,
+    sidebarCopy.couldNotInstallUpdate,
+    sidebarCopy.couldNotStartUpdateDownload,
+    sidebarCopy.restartToInstallUpdate,
+    sidebarCopy.unexpectedError,
+    sidebarCopy.updateDownloaded,
+  ]);
 
   const expandThreadListForProject = useCallback((projectId: ProjectId) => {
     setExpandedThreadListsByProject((current) => {
@@ -1127,7 +1356,7 @@ export default function Sidebar() {
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
+          {sidebarCopy.versionLabel} {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
     </div>
@@ -1171,7 +1400,7 @@ export default function Sidebar() {
           <SidebarGroup className="px-2 pt-2 pb-0">
             <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
               <TriangleAlertIcon />
-              <AlertTitle>Intel build on Apple Silicon</AlertTitle>
+              <AlertTitle>{sidebarCopy.intelBuildOnAppleSilicon}</AlertTitle>
               <AlertDescription>{arm64IntelBuildWarningDescription}</AlertDescription>
               {desktopUpdateButtonAction !== "none" ? (
                 <AlertAction>
@@ -1182,8 +1411,8 @@ export default function Sidebar() {
                     onClick={handleDesktopUpdateButtonClick}
                   >
                     {desktopUpdateButtonAction === "download"
-                      ? "Download ARM build"
-                      : "Install ARM build"}
+                      ? sidebarCopy.downloadArmBuild
+                      : sidebarCopy.installArmBuild}
                   </Button>
                 </AlertAction>
               ) : null}
@@ -1193,14 +1422,14 @@ export default function Sidebar() {
         <SidebarGroup className="px-2 py-2">
           <div className="mb-1 flex items-center justify-between px-2">
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Projects
+              {sidebarCopy.projects}
             </span>
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label="Add project"
+                    aria-label={sidebarCopy.addProject}
                     aria-pressed={shouldShowProjectPathEntry}
                     className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     onClick={handleStartAddProject}
@@ -1213,7 +1442,7 @@ export default function Sidebar() {
                   }`}
                 />
               </TooltipTrigger>
-              <TooltipPopup side="right">Add project</TooltipPopup>
+              <TooltipPopup side="right">{sidebarCopy.addProject}</TooltipPopup>
             </Tooltip>
           </div>
 
@@ -1227,7 +1456,7 @@ export default function Sidebar() {
                   disabled={isPickingFolder || isAddingProject}
                 >
                   <FolderIcon className="size-3.5" />
-                  {isPickingFolder ? "Picking folder..." : "Browse for folder"}
+                  {isPickingFolder ? sidebarCopy.pickingFolder : sidebarCopy.browseForFolder}
                 </button>
               )}
               <div className="flex gap-1.5">
@@ -1259,7 +1488,7 @@ export default function Sidebar() {
                   onClick={handleAddProject}
                   disabled={!canAddProject}
                 >
-                  {isAddingProject ? "Adding..." : "Add"}
+                  {isAddingProject ? sidebarCopy.adding : sidebarCopy.add}
                 </button>
               </div>
               {addProjectError && (
@@ -1276,7 +1505,7 @@ export default function Sidebar() {
                     setAddProjectError(null);
                   }}
                 >
-                  Cancel
+                  {sidebarCopy.cancel}
                 </button>
               </div>
             </div>
@@ -1350,7 +1579,9 @@ export default function Sidebar() {
                                     render={
                                       <button
                                         type="button"
-                                        aria-label={`Create new thread in ${project.name}`}
+                                        aria-label={sidebarCopy.createNewThreadInProject(
+                                          project.name,
+                                        )}
                                         data-testid="new-thread-button"
                                       />
                                     }
@@ -1371,9 +1602,7 @@ export default function Sidebar() {
                                 }
                               />
                               <TooltipPopup side="top">
-                                {newThreadShortcutLabel
-                                  ? `New thread (${newThreadShortcutLabel})`
-                                  : "New thread"}
+                                {sidebarCopy.newThread(newThreadShortcutLabel)}
                               </TooltipPopup>
                             </Tooltip>
                           </div>
@@ -1393,10 +1622,12 @@ export default function Sidebar() {
                                 });
                                 const prStatus = prStatusIndicator(
                                   prByThreadId.get(thread.id) ?? null,
+                                  appSettings.language,
                                 );
                                 const terminalStatus = terminalStatusFromRunningIds(
                                   selectThreadTerminalState(terminalStateByThreadId, thread.id)
                                     .runningTerminalIds,
+                                  appSettings.language,
                                 );
 
                                 return (
@@ -1482,7 +1713,10 @@ export default function Sidebar() {
                                               }`}
                                             />
                                             <span className="hidden md:inline">
-                                              {threadStatus.label}
+                                              {localizeThreadStatusLabel(
+                                                threadStatus.label,
+                                                appSettings.language,
+                                              )}
                                             </span>
                                           </span>
                                         )}
@@ -1551,7 +1785,10 @@ export default function Sidebar() {
                                               : "text-muted-foreground/40"
                                           }`}
                                         >
-                                          {formatRelativeTime(thread.createdAt)}
+                                          {formatRelativeTime(
+                                            thread.createdAt,
+                                            appSettings.language,
+                                          )}
                                         </span>
                                       </div>
                                     </SidebarMenuSubButton>
@@ -1570,7 +1807,7 @@ export default function Sidebar() {
                                       expandThreadListForProject(project.id);
                                     }}
                                   >
-                                    <span>Show more</span>
+                                    <span>{sidebarCopy.showMore}</span>
                                   </SidebarMenuSubButton>
                                 </SidebarMenuSubItem>
                               )}
@@ -1585,7 +1822,7 @@ export default function Sidebar() {
                                       collapseThreadListForProject(project.id);
                                     }}
                                   >
-                                    <span>Show less</span>
+                                    <span>{sidebarCopy.showLess}</span>
                                   </SidebarMenuSubButton>
                                 </SidebarMenuSubItem>
                               )}
@@ -1602,7 +1839,7 @@ export default function Sidebar() {
 
           {projects.length === 0 && !shouldShowProjectPathEntry && (
             <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-              No projects yet
+              {sidebarCopy.noProjectsYet}
             </div>
           )}
         </SidebarGroup>
@@ -1619,7 +1856,7 @@ export default function Sidebar() {
                 onClick={() => window.history.back()}
               >
                 <ArrowLeftIcon className="size-3.5" />
-                <span className="text-xs">Back</span>
+                <span className="text-xs">{sidebarCopy.back}</span>
               </SidebarMenuButton>
             ) : (
               <SidebarMenuButton
@@ -1628,7 +1865,7 @@ export default function Sidebar() {
                 onClick={() => void navigate({ to: "/settings" })}
               >
                 <SettingsIcon className="size-3.5" />
-                <span className="text-xs">Settings</span>
+                <span className="text-xs">{sidebarCopy.settings}</span>
               </SidebarMenuButton>
             )}
           </SidebarMenuItem>
