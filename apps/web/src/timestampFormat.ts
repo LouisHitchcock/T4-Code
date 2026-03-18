@@ -1,4 +1,9 @@
-import { type TimestampFormat } from "./appSettings";
+import { getAppLanguageDetails } from "./appLanguage";
+import { getAppSettingsSnapshot, type TimestampFormat } from "./appSettings";
+
+export function getTimestampFormatterLocale(): string {
+  return getAppLanguageDetails(getAppSettingsSnapshot().language).locale;
+}
 
 export function getTimestampFormatOptions(
   timestampFormat: TimestampFormat,
@@ -26,14 +31,15 @@ function getTimestampFormatter(
   timestampFormat: TimestampFormat,
   includeSeconds: boolean,
 ): Intl.DateTimeFormat {
-  const cacheKey = `${timestampFormat}:${includeSeconds ? "seconds" : "minutes"}`;
+  const locale = getTimestampFormatterLocale();
+  const cacheKey = `${locale}:${timestampFormat}:${includeSeconds ? "seconds" : "minutes"}`;
   const cachedFormatter = timestampFormatterCache.get(cacheKey);
   if (cachedFormatter) {
     return cachedFormatter;
   }
 
   const formatter = new Intl.DateTimeFormat(
-    undefined,
+    locale,
     getTimestampFormatOptions(timestampFormat, includeSeconds),
   );
   timestampFormatterCache.set(cacheKey, formatter);

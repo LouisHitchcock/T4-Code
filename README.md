@@ -81,6 +81,7 @@ For the full local packaging and release notes, see [docs/release.md](docs/relea
 Open Settings in the app to configure provider-specific behavior on the current device.
 
 - **Appearance**: choose the base light/dark/system mode, switch to integrated presets like Lilac, and configure a custom chat background image with adjustable fade and blur.
+- **Language**: switch the settings experience and shared app shell between English and Persian. Persian also flips document direction and locale-aware time/date formatting in the web UI.
 - **Provider overrides**: set custom binary paths for Codex, Copilot, or Kimi, plus an optional Codex home path, an OpenRouter API key for Codex, and a Kimi API key.
 - **OpenRouter free models**: review the current OpenRouter entries that are explicitly free-locked and compatible with CUT3's native tool-calling path (`tools` plus `tool_choice`), keep the built-in `openrouter/free` router handy, and pin any listed model into the picker.
 - **Custom model slugs**: save extra model ids for GitHub Copilot, Kimi, custom Codex models, or current OpenRouter `:free` slugs so they appear in the model picker and `/model` suggestions.

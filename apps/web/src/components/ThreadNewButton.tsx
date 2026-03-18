@@ -7,12 +7,16 @@ import { useNewThreadActions } from "../hooks/useNewThread";
 import { shortcutLabelForCommand } from "../keybindings";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
+import { useAppSettings } from "../appSettings";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
 export default function ThreadNewButton({ className }: { className?: string }) {
+  const {
+    settings: { language },
+  } = useAppSettings();
   const { data: keybindings = EMPTY_KEYBINDINGS } = useQuery({
     ...serverConfigQueryOptions(),
     select: (config) => config.keybindings,
@@ -26,9 +30,15 @@ export default function ThreadNewButton({ className }: { className?: string }) {
   );
   const buttonLabel = defaultProjectId
     ? shortcutLabel
-      ? `New thread (${shortcutLabel})`
-      : "New thread"
-    : "No project available for a new thread";
+      ? language === "fa"
+        ? `رشته جدید (${shortcutLabel})`
+        : `New thread (${shortcutLabel})`
+      : language === "fa"
+        ? "رشته جدید"
+        : "New thread"
+    : language === "fa"
+      ? "هیچ پروژه ای برای ساخت رشته جدید در دسترس نیست"
+      : "No project available for a new thread";
 
   return (
     <Tooltip>

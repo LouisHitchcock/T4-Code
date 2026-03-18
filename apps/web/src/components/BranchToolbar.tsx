@@ -1,7 +1,8 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { FolderIcon, GitForkIcon } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
+import { useAppSettings } from "../appSettings";
 import { newCommandId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -13,11 +14,6 @@ import {
 } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
-
-const envModeItems = [
-  { value: "local", label: "Local" },
-  { value: "worktree", label: "New worktree" },
-] as const;
 
 interface BranchToolbarProps {
   threadId: ThreadId;
@@ -34,6 +30,32 @@ export default function BranchToolbar({
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
 }: BranchToolbarProps) {
+  const {
+    settings: { language },
+  } = useAppSettings();
+  const envModeCopy = useMemo(
+    () =>
+      language === "fa"
+        ? {
+            local: "محلی",
+            newWorktree: "worktree جدید",
+            worktree: "worktree",
+          }
+        : {
+            local: "Local",
+            newWorktree: "New worktree",
+            worktree: "Worktree",
+          },
+    [language],
+  );
+  const envModeItems = useMemo(
+    () =>
+      [
+        { value: "local", label: envModeCopy.local },
+        { value: "worktree", label: envModeCopy.newWorktree },
+      ] as const,
+    [envModeCopy.local, envModeCopy.newWorktree],
+  );
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const setThreadBranchAction = useStore((store) => store.setThreadBranch);
@@ -115,12 +137,12 @@ export default function BranchToolbar({
           {activeWorktreePath ? (
             <>
               <GitForkIcon className="size-3" />
-              Worktree
+              {envModeCopy.worktree}
             </>
           ) : (
             <>
               <FolderIcon className="size-3" />
-              Local
+              {envModeCopy.local}
             </>
           )}
         </span>
@@ -142,13 +164,13 @@ export default function BranchToolbar({
             <SelectItem value="local">
               <span className="inline-flex items-center gap-1.5">
                 <FolderIcon className="size-3" />
-                Local
+                {envModeCopy.local}
               </span>
             </SelectItem>
             <SelectItem value="worktree">
               <span className="inline-flex items-center gap-1.5">
                 <GitForkIcon className="size-3" />
-                New worktree
+                {envModeCopy.newWorktree}
               </span>
             </SelectItem>
           </SelectPopup>

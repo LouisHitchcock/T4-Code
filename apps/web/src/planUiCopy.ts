@@ -1,0 +1,73 @@
+import { type AppLanguage } from "./appLanguage";
+
+export function getPlanUiCopy(language: AppLanguage) {
+  if (language === "fa") {
+    return {
+      planLabel: "طرح",
+      proposedPlanFallbackTitle: "طرح پیشنهادی",
+      planActions: "اقدام های طرح",
+      copied: "کپی شد",
+      copyToClipboard: "کپی در کلیپ بورد",
+      downloadAsMarkdown: "دانلود به صورت markdown",
+      saveToWorkspace: "ذخیره در فضای کاری",
+      closePlanSidebar: "بستن پنل طرح",
+      steps: "گام ها",
+      fullPlan: "طرح کامل",
+      noActivePlanYet: "هنوز طرح فعالی وجود ندارد.",
+      plansWillAppearWhenGenerated: "طرح ها بعد از تولید اینجا نمایش داده می شوند.",
+      planSaved: "طرح ذخیره شد",
+      planSavedToWorkspace: "طرح در فضای کاری ذخیره شد",
+      couldNotSavePlan: "ذخیره طرح انجام نشد",
+      genericError: "خطایی رخ داد.",
+      genericSaveError: "هنگام ذخیره خطایی رخ داد.",
+      collapsePlan: "جمع کردن طرح",
+      expandPlan: "باز کردن طرح",
+      workspacePathUnavailable: "مسیر فضای کاری در دسترس نیست",
+      workspacePathUnavailableDescription: "این رشته مسیر فضای کاری برای ذخیره کردن ندارد.",
+      enterWorkspacePath: "یک مسیر برای فضای کاری وارد کنید",
+      savePlanToWorkspace: "ذخیره طرح در فضای کاری",
+      savePlanDialogDescription: (workspaceLabel: string) =>
+        `یک مسیر نسبی نسبت به ${workspaceLabel} وارد کنید.`,
+      workspacePath: "مسیر فضای کاری",
+      cancel: "لغو",
+      save: "ذخیره",
+      saving: "در حال ذخیره...",
+      showPlanSidebar: "نمایش پنل طرح",
+      hidePlanSidebar: "پنهان کردن پنل طرح",
+    };
+  }
+
+  return {
+    planLabel: "Plan",
+    proposedPlanFallbackTitle: "Proposed plan",
+    planActions: "Plan actions",
+    copied: "Copied!",
+    copyToClipboard: "Copy to clipboard",
+    downloadAsMarkdown: "Download as markdown",
+    saveToWorkspace: "Save to workspace",
+    closePlanSidebar: "Close plan sidebar",
+    steps: "Steps",
+    fullPlan: "Full Plan",
+    noActivePlanYet: "No active plan yet.",
+    plansWillAppearWhenGenerated: "Plans will appear here when generated.",
+    planSaved: "Plan saved",
+    planSavedToWorkspace: "Plan saved to workspace",
+    couldNotSavePlan: "Could not save plan",
+    genericError: "An error occurred.",
+    genericSaveError: "An error occurred while saving.",
+    collapsePlan: "Collapse plan",
+    expandPlan: "Expand plan",
+    workspacePathUnavailable: "Workspace path is unavailable",
+    workspacePathUnavailableDescription: "This thread does not have a workspace path to save into.",
+    enterWorkspacePath: "Enter a workspace path",
+    savePlanToWorkspace: "Save plan to workspace",
+    savePlanDialogDescription: (workspaceLabel: string) =>
+      `Enter a path relative to ${workspaceLabel}.`,
+    workspacePath: "Workspace path",
+    cancel: "Cancel",
+    save: "Save",
+    saving: "Saving...",
+    showPlanSidebar: "Show plan sidebar",
+    hidePlanSidebar: "Hide plan sidebar",
+  };
+}

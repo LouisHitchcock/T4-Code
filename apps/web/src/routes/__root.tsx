@@ -11,7 +11,9 @@ import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
 import { isElectron } from "../env";
+import { applyDocumentLanguage } from "../appLanguage";
 import { APP_DISPLAY_NAME } from "../branding";
+import { useAppSettings } from "../appSettings";
 import { Button } from "../components/ui/button";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../components/ui/alert";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
@@ -48,12 +50,22 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  const {
+    settings: { language },
+  } = useAppSettings();
+
+  useEffect(() => {
+    applyDocumentLanguage(language);
+  }, [language]);
+
   if (!readNativeApi()) {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground">
         <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-muted-foreground">
-            Connecting to {APP_DISPLAY_NAME} server...
+            {language === "fa"
+              ? `در حال اتصال به سرور ${APP_DISPLAY_NAME}...`
+              : `Connecting to ${APP_DISPLAY_NAME} server...`}
           </p>
         </div>
       </div>
@@ -73,6 +85,9 @@ function RootRouteView() {
 }
 
 function ServerConnectionBanner() {
+  const {
+    settings: { language },
+  } = useAppSettings();
   const connectionState = useSyncExternalStore(
     subscribeServerConnectionState,
     getServerConnectionState,
@@ -105,8 +120,12 @@ function ServerConnectionBanner() {
   }
 
   const retrying = connectionState === "reconnecting" || connectionState === "closed";
-  const bannerTitle = getServerConnectionBannerTitle({ retrying, isElectron });
-  const bannerDescription = getServerConnectionBannerDescription({ retrying, isElectron });
+  const bannerTitle = getServerConnectionBannerTitle({ retrying, isElectron, language });
+  const bannerDescription = getServerConnectionBannerDescription({
+    retrying,
+    isElectron,
+    language,
+  });
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center px-3 sm:px-6">
@@ -122,7 +141,7 @@ function ServerConnectionBanner() {
         </div>
         <AlertAction>
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-            Reload app
+            {language === "fa" ? "بارگذاری دوباره برنامه" : "Reload app"}
           </Button>
         </AlertAction>
       </Alert>
@@ -131,6 +150,9 @@ function ServerConnectionBanner() {
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
+  const {
+    settings: { language },
+  } = useAppSettings();
   const message = errorMessage(error);
   const details = errorDetails(error);
 
@@ -146,23 +168,27 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
           {APP_DISPLAY_NAME}
         </p>
         <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Something went wrong.
+          {language === "fa" ? "مشکلی پیش آمد." : "Something went wrong."}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
 
         <div className="mt-5 flex flex-wrap gap-2">
           <Button size="sm" onClick={() => reset()}>
-            Try again
+            {language === "fa" ? "دوباره تلاش کنید" : "Try again"}
           </Button>
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-            Reload app
+            {language === "fa" ? "بارگذاری دوباره برنامه" : "Reload app"}
           </Button>
         </div>
 
         <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
           <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-            <span className="group-open:hidden">Show error details</span>
-            <span className="hidden group-open:inline">Hide error details</span>
+            <span className="group-open:hidden">
+              {language === "fa" ? "نمایش جزئیات خطا" : "Show error details"}
+            </span>
+            <span className="hidden group-open:inline">
+              {language === "fa" ? "پنهان کردن جزئیات خطا" : "Hide error details"}
+            </span>
           </summary>
           <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
             {details}
@@ -202,6 +228,9 @@ function errorDetails(error: unknown): string {
 }
 
 function EventRouter() {
+  const {
+    settings: { language },
+  } = useAppSettings();
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setProjectExpanded = useStore((store) => store.setProjectExpanded);
   const removeOrphanedTerminalStates = useTerminalStateStore(
@@ -357,18 +386,24 @@ function EventRouter() {
       if (!issue) {
         toastManager.add({
           type: "success",
-          title: "Keybindings updated",
-          description: "Keybindings configuration reloaded successfully.",
+          title: language === "fa" ? "کلیدهای میانبر به روز شد" : "Keybindings updated",
+          description:
+            language === "fa"
+              ? "پیکربندی کلیدهای میانبر با موفقیت دوباره بارگذاری شد."
+              : "Keybindings configuration reloaded successfully.",
         });
         return;
       }
 
       toastManager.add({
         type: "warning",
-        title: "Invalid keybindings configuration",
+        title:
+          language === "fa"
+            ? "پیکربندی کلیدهای میانبر نامعتبر است"
+            : "Invalid keybindings configuration",
         description: issue.message,
         actionProps: {
-          children: "Open keybindings.json",
+          children: language === "fa" ? "باز کردن keybindings.json" : "Open keybindings.json",
           onClick: () => {
             void queryClient
               .ensureQueryData(serverConfigQueryOptions())
@@ -382,7 +417,10 @@ function EventRouter() {
               .catch((error) => {
                 toastManager.add({
                   type: "error",
-                  title: "Unable to open keybindings file",
+                  title:
+                    language === "fa"
+                      ? "باز کردن فایل کلیدهای میانبر ممکن نشد"
+                      : "Unable to open keybindings file",
                   description:
                     error instanceof Error ? error.message : "Unknown error opening file.",
                 });
@@ -403,6 +441,7 @@ function EventRouter() {
       unsubServerConfigUpdated();
     };
   }, [
+    language,
     navigate,
     queryClient,
     removeOrphanedTerminalStates,

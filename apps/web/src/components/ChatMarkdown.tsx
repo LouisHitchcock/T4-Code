@@ -21,6 +21,7 @@ import {
   resolveChatCodeThemeName,
   type ChatCodeThemeName,
 } from "../lib/chatCodeThemes";
+import { useAppSettings } from "../appSettings";
 import { openInPreferredEditor } from "../editorPreferences";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
@@ -150,6 +151,9 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
 }
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+  const {
+    settings: { language },
+  } = useAppSettings();
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(() => {
@@ -187,8 +191,24 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
         type="button"
         className="chat-markdown-copy-button"
         onClick={handleCopy}
-        title={copied ? "Copied" : "Copy code"}
-        aria-label={copied ? "Copied" : "Copy code"}
+        title={
+          copied
+            ? language === "fa"
+              ? "کپی شد"
+              : "Copied"
+            : language === "fa"
+              ? "کپی کد"
+              : "Copy code"
+        }
+        aria-label={
+          copied
+            ? language === "fa"
+              ? "کپی شد"
+              : "Copied"
+            : language === "fa"
+              ? "کپی کد"
+              : "Copy code"
+        }
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>

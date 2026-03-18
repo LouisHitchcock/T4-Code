@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_APP_LANGUAGE_SETTING,
   DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX,
   DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT,
   getAppSettingsSnapshot,
@@ -240,5 +241,12 @@ describe("chat background settings defaults", () => {
 describe("timestamp format defaults", () => {
   it("defaults timestamp format to locale", () => {
     expect(DEFAULT_TIMESTAMP_FORMAT).toBe("locale");
+  });
+});
+
+describe("language defaults", () => {
+  it("defaults app language to English", () => {
+    expect(DEFAULT_APP_LANGUAGE_SETTING).toBe("en");
+    expect(getAppSettingsSnapshot().language).toBe("en");
   });
 });
