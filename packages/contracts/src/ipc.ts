@@ -29,6 +29,9 @@ import type {
   ServerCopilotReasoningProbe,
   ServerCopilotReasoningProbeInput,
   ServerCopilotUsage,
+  ServerOpenCodeAddCredentialInput,
+  ServerOpenCodeCredentialResult,
+  ServerOpenCodeRemoveCredentialInput,
   ServerOpenCodeState,
   ServerOpenCodeStateInput,
 } from "./server";
@@ -175,6 +178,12 @@ export interface NativeApi {
     ) => Promise<ServerCopilotReasoningProbe>;
     getOpenCodeState: (input?: ServerOpenCodeStateInput) => Promise<ServerOpenCodeState>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+    addOpenCodeCredential: (
+      input: ServerOpenCodeAddCredentialInput,
+    ) => Promise<ServerOpenCodeCredentialResult>;
+    removeOpenCodeCredential: (
+      input: ServerOpenCodeRemoveCredentialInput,
+    ) => Promise<ServerOpenCodeCredentialResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

@@ -31,6 +31,7 @@ import { openRouterFreeModelsQueryOptions } from "../lib/openRouterReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
 import { AppearanceSettingsSection } from "../components/AppearanceSettingsSection";
+import { OpenCodeCredentialsManager } from "../components/OpenCodeCredentialsManager";
 import ThreadNewButton from "../components/ThreadNewButton";
 import ThreadSidebarToggle from "../components/ThreadSidebarToggle";
 import { Button } from "../components/ui/button";
@@ -133,7 +134,7 @@ function getSettingsCopy(language: AppLanguage) {
       resetCopilotOverrides: "بازنشانی بازنویسی های Copilot",
       opencodeTitle: "OpenCode CLI",
       opencodeDescription:
-        "این بازنویسی روی نشست های جدید OpenCode اعمال می شود و به شما اجازه می دهد از نصب غیرپیش فرض opencode استفاده کنید. پیش از شروع نشست های جدید، با opencode auth login وارد شوید و پیکربندی معمول OpenCode را آماده نگه دارید.",
+        "این بازنویسی روی نشست های جدید OpenCode اعمال می شود و به شما اجازه می دهد از نصب غیرپیش فرض opencode استفاده کنید. پیش از شروع نشست های جدید، با opencode auth login وارد شوید و پیکربندی معمول OpenCode را آماده نگه دارید. توجه: برخی ارائه دهندگان مانند MiniMax از طریق OpenRouter مسیریابی می شوند و برای کار کردن به یک کلید API OpenRouter با اعتبار نیاز دارند.",
       opencodeBinaryPath: "مسیر باینری OpenCode",
       leaveBlankOpencode: "برای استفاده از opencode از PATH این کادر را خالی بگذارید.",
       resetOpencodeOverrides: "بازنشانی بازنویسی های OpenCode",
@@ -309,7 +310,7 @@ function getSettingsCopy(language: AppLanguage) {
     resetCopilotOverrides: "Reset copilot overrides",
     opencodeTitle: "OpenCode CLI",
     opencodeDescription:
-      "This override applies to new OpenCode sessions and lets you use a non-default opencode install. Run `opencode auth login` and keep your normal OpenCode provider configuration ready before starting new sessions.",
+      "This override applies to new OpenCode sessions and lets you use a non-default opencode install. Run `opencode auth login` and keep your normal OpenCode provider configuration ready before starting new sessions. Note: Some providers like MiniMax route through OpenRouter and require an OpenRouter API key with credits to work.",
     opencodeBinaryPath: "OpenCode binary path",
     leaveBlankOpencode: "Leave blank to use opencode from your PATH.",
     resetOpencodeOverrides: "Reset OpenCode overrides",
@@ -1349,6 +1350,10 @@ function SettingsRouteView() {
                   >
                     {copy.resetOpencodeOverrides}
                   </Button>
+                </div>
+
+                <div className="pt-4 border-t border-border">
+                  <OpenCodeCredentialsManager />
                 </div>
               </div>
             </section>

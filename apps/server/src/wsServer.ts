@@ -1308,6 +1308,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* openCodeState.getState(body);
       }
 
+      case WS_METHODS.serverAddOpenCodeCredential: {
+        const body = stripRequestTag(request.body);
+        return yield* openCodeState.addCredential(body);
+      }
+
+      case WS_METHODS.serverRemoveOpenCodeCredential: {
+        const body = stripRequestTag(request.body);
+        return yield* openCodeState.removeCredential(body);
+      }
+
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);

@@ -166,8 +166,8 @@ function mergeOpenCodeConfig(
     : undefined;
   if (basePermission || overridePermission) {
     merged.permission = {
-      ...basePermission
-      ...overridePermission
+      ...basePermission,
+      ...overridePermission,
     };
   }
   return merged;

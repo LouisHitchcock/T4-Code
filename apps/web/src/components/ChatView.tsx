@@ -60,6 +60,7 @@ import {
   serverConfigQueryOptions,
   serverCopilotReasoningProbeQueryOptions,
   serverCopilotUsageQueryOptions,
+  serverOpenCodeStateQueryOptions,
   serverQueryKeys,
 } from "~/lib/serverReactQuery";
 import { formatCopilotRequestCost } from "~/lib/copilotBilling";
@@ -1178,6 +1179,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       openRouterPickerOptions,
     ],
   );
+  const openCodeStateQuery = useQuery(
+    serverOpenCodeStateQueryOptions({
+      cwd: activeProject?.cwd,
+      binaryPath: settings.opencodeBinaryPath.trim() || undefined,
+      refreshModels: false,
+    }),
+  );
+  const opencodeModelOptions = useMemo(() => {
+    if (openCodeStateQuery.data?.status !== "available") {
+      return [];
+    }
+    return openCodeStateQuery.data.models.map((model) => ({
+      slug: model.slug,
+      name: `${model.providerId}/${model.modelId}`,
+    }));
+  }, [openCodeStateQuery.data]);
   const customModelsForSelectedProvider = useMemo(
     () => modelOptionsByProvider[selectedProvider].map((option) => option.slug),
     [modelOptionsByProvider, selectedProvider],
@@ -1399,6 +1416,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedProviderPickerKind,
       modelOptionsByProvider,
       openRouterModelOptions,
+      opencodeModelOptions,
     );
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
       ? selectedModelForPicker
@@ -1406,6 +1424,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [
     modelOptionsByProvider,
     openRouterModelOptions,
+    opencodeModelOptions,
     selectedModelForPicker,
     selectedProvider,
     selectedProviderPickerKind,
@@ -1421,6 +1440,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           option.value,
           modelOptionsByProvider,
           openRouterModelOptions,
+          opencodeModelOptions,
         ).map(({ slug, name }) => ({
           provider: getProviderPickerBackingProvider(option.value) ?? "codex",
           providerLabel: option.label,
@@ -1431,7 +1451,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           searchProvider: option.label.toLowerCase(),
         })),
       ),
-    [lockedProvider, modelOptionsByProvider, openRouterModelOptions],
+    [lockedProvider, modelOptionsByProvider, openRouterModelOptions, opencodeModelOptions],
   );
   const phase = derivePhase(activeThread?.session ?? null);
   const isConnecting = phase === "connecting";
@@ -4609,6 +4629,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         lockedProvider={lockedProvider}
                         modelOptionsByProvider={modelOptionsByProvider}
                         openRouterModelOptions={openRouterModelOptions}
+                        opencodeModelOptions={opencodeModelOptions}
                         openRouterContextLengthsBySlug={openRouterContextLengthsBySlug}
                         serviceTierSetting={selectedServiceTierSetting}
                         onProviderModelChange={onProviderModelSelectFromPicker}
@@ -6732,6 +6753,7 @@ function getModelOptionsForProviderPicker(
   providerPickerKind: AvailableProviderPickerKind,
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>,
   openRouterModelOptions: ReadonlyArray<{ slug: string; name: string }>,
+  opencodeModelOptions: ReadonlyArray<{ slug: string; name: string }>,
 ): ReadonlyArray<{ slug: string; name: string }> {
   switch (providerPickerKind) {
     case "openrouter":
@@ -6741,7 +6763,7 @@ function getModelOptionsForProviderPicker(
     case "copilot":
       return modelOptionsByProvider.copilot;
     case "opencode":
-      return modelOptionsByProvider.opencode;
+      return mergeModelOptions(modelOptionsByProvider.opencode, opencodeModelOptions);
     case "kimi":
       return modelOptionsByProvider.kimi;
     default:
@@ -7147,6 +7169,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   lockedProvider: ProviderKind | null;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   openRouterModelOptions: ReadonlyArray<{ slug: string; name: string }>;
+  opencodeModelOptions: ReadonlyArray<{ slug: string; name: string }>;
   openRouterContextLengthsBySlug: ReadonlyMap<string, number | null>;
   serviceTierSetting: AppServiceTier;
   compact?: boolean;
@@ -7161,8 +7184,14 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         props.providerPickerKind,
         props.modelOptionsByProvider,
         props.openRouterModelOptions,
+        props.opencodeModelOptions,
       ),
-    [props.modelOptionsByProvider, props.openRouterModelOptions, props.providerPickerKind],
+    [
+      props.modelOptionsByProvider,
+      props.openRouterModelOptions,
+      props.opencodeModelOptions,
+      props.providerPickerKind,
+    ],
   );
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ??
@@ -7239,6 +7268,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             option.value,
             props.modelOptionsByProvider,
             props.openRouterModelOptions,
+            props.opencodeModelOptions,
           );
           const isDisabledByProviderLock =
             props.lockedProvider !== null && props.lockedProvider !== backingProvider;

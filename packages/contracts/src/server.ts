@@ -222,3 +222,22 @@ export const ServerConfigUpdatedPayload = Schema.Struct({
   providers: ServerProviderStatuses,
 });
 export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;
+
+export const ServerOpenCodeAddCredentialInput = Schema.Struct({
+  provider: TrimmedNonEmptyString,
+  apiKey: TrimmedNonEmptyString,
+  binaryPath: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerOpenCodeAddCredentialInput = typeof ServerOpenCodeAddCredentialInput.Type;
+
+export const ServerOpenCodeRemoveCredentialInput = Schema.Struct({
+  provider: TrimmedNonEmptyString,
+  binaryPath: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerOpenCodeRemoveCredentialInput = typeof ServerOpenCodeRemoveCredentialInput.Type;
+
+export const ServerOpenCodeCredentialResult = Schema.Struct({
+  success: Schema.Boolean,
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerOpenCodeCredentialResult = typeof ServerOpenCodeCredentialResult.Type;
