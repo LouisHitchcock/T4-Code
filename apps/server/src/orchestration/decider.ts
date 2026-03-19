@@ -48,6 +48,27 @@ function withEventBase(
   };
 }
 
+function findLatestThreadActivityForRequest(
+  readModel: OrchestrationReadModel,
+  threadId: string,
+  requestId: string,
+) {
+  const thread = readModel.threads.find((entry) => entry.id === threadId);
+  if (!thread) {
+    return undefined;
+  }
+  return [...thread.activities]
+    .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .toReversed()
+    .find((activity) => {
+      const payload = activity.payload;
+      if (!payload || typeof payload !== "object") {
+        return false;
+      }
+      return "requestId" in payload && payload.requestId === requestId;
+    });
+}
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -350,24 +371,58 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      return {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-          metadata: {
+      const latestRequestActivity = findLatestThreadActivityForRequest(
+        readModel,
+        command.threadId,
+        command.requestId,
+      );
+      return [
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+            metadata: {
+              requestId: command.requestId,
+            },
+          }),
+          type: "thread.approval-response-requested",
+          payload: {
+            threadId: command.threadId,
             requestId: command.requestId,
+            decision: command.decision,
+            createdAt: command.createdAt,
           },
-        }),
-        type: "thread.approval-response-requested",
-        payload: {
-          threadId: command.threadId,
-          requestId: command.requestId,
-          decision: command.decision,
-          createdAt: command.createdAt,
         },
-      };
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+            metadata: {
+              requestId: command.requestId,
+            },
+          }),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: crypto.randomUUID() as OrchestrationEvent["eventId"],
+              tone: "approval",
+              kind: "approval.resolved",
+              summary: "Approval resolved",
+              payload: {
+                requestId: command.requestId,
+                decision: command.decision,
+              },
+              turnId: latestRequestActivity?.turnId ?? null,
+              createdAt: command.createdAt,
+            },
+          },
+        },
+      ];
     }
 
     case "thread.user-input.respond": {
@@ -376,24 +431,58 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      return {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-          metadata: {
+      const latestRequestActivity = findLatestThreadActivityForRequest(
+        readModel,
+        command.threadId,
+        command.requestId,
+      );
+      return [
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+            metadata: {
+              requestId: command.requestId,
+            },
+          }),
+          type: "thread.user-input-response-requested",
+          payload: {
+            threadId: command.threadId,
             requestId: command.requestId,
+            answers: command.answers,
+            createdAt: command.createdAt,
           },
-        }),
-        type: "thread.user-input-response-requested",
-        payload: {
-          threadId: command.threadId,
-          requestId: command.requestId,
-          answers: command.answers,
-          createdAt: command.createdAt,
         },
-      };
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+            metadata: {
+              requestId: command.requestId,
+            },
+          }),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: crypto.randomUUID() as OrchestrationEvent["eventId"],
+              tone: "info",
+              kind: "user-input.resolved",
+              summary: "User input submitted",
+              payload: {
+                requestId: command.requestId,
+                answers: command.answers,
+              },
+              turnId: latestRequestActivity?.turnId ?? null,
+              createdAt: command.createdAt,
+            },
+          },
+        },
+      ];
     }
 
     case "thread.checkpoint.revert": {
