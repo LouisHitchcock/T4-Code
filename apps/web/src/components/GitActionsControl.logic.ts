@@ -329,6 +329,9 @@ export function resolveQuickAction(
   }
 
   if (hasChanges) {
+    if (isDiverged || isBehind) {
+      return { label: copy.commit, disabled: false, kind: "run_action", action: "commit" };
+    }
     if (!gitStatus.hasUpstream && !hasPreferredRemote) {
       return { label: copy.commit, disabled: false, kind: "run_action", action: "commit" };
     }

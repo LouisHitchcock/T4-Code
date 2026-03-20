@@ -41,21 +41,39 @@ import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 
+const ENABLE_PROVIDER_EVENT_LOGS_ENV = "CUT3_ENABLE_PROVIDER_EVENT_LOGS";
+
+function shouldEnableProviderEventLogs(): boolean {
+  const raw = process.env[ENABLE_PROVIDER_EVENT_LOGS_ENV]?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 export function makeServerProviderLayer(): Layer.Layer<
   ProviderService,
   ProviderUnsupportedError,
   SqlClient.SqlClient | ServerConfig | FileSystem.FileSystem | AnalyticsService
 > {
   return Effect.gen(function* () {
-    const { stateDir } = yield* ServerConfig;
-    const providerLogsDir = path.join(stateDir, "logs", "provider");
-    const providerEventLogPath = path.join(providerLogsDir, "events.log");
-    const nativeEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
-      stream: "native",
-    });
-    const canonicalEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
-      stream: "canonical",
-    });
+    const nativeEventLogger = shouldEnableProviderEventLogs()
+      ? yield* Effect.gen(function* () {
+          const { stateDir } = yield* ServerConfig;
+          const providerLogsDir = path.join(stateDir, "logs", "provider");
+          const providerEventLogPath = path.join(providerLogsDir, "events.log");
+          return yield* makeEventNdjsonLogger(providerEventLogPath, {
+            stream: "native",
+          });
+        })
+      : undefined;
+    const canonicalEventLogger = shouldEnableProviderEventLogs()
+      ? yield* Effect.gen(function* () {
+          const { stateDir } = yield* ServerConfig;
+          const providerLogsDir = path.join(stateDir, "logs", "provider");
+          const providerEventLogPath = path.join(providerLogsDir, "events.log");
+          return yield* makeEventNdjsonLogger(providerEventLogPath, {
+            stream: "canonical",
+          });
+        })
+      : undefined;
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(ProviderSessionRuntimeRepositoryLive),
     );

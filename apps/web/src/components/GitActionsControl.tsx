@@ -524,7 +524,6 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
         const existingOpenPrUrl =
           actionStatus?.pr?.state === "open" ? actionStatus.pr.url : undefined;
         const prUrl = result.pr.url ?? existingOpenPrUrl;
-        const shouldOfferPushCta = action === "commit" && result.commit.status === "created";
         const shouldOfferOpenPrCta =
           (action === "commit_push" || action === "commit_push_pr") &&
           !!prUrl &&
@@ -549,49 +548,34 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
             ...threadToastData,
             dismissAfterVisibleMs: 10_000,
           },
-          ...(shouldOfferPushCta
+          ...(shouldOfferOpenPrCta
             ? {
                 actionProps: {
-                  children: gitCopy.pushAction,
+                  children: gitCopy.viewPrAction,
                   onClick: () => {
-                    void runGitActionWithToast({
-                      action: "commit_push",
-                      forcePushOnlyProgress: true,
-                      onConfirmed: closeResultToast,
-                      statusOverride: actionStatus,
-                      isDefaultBranchOverride: actionIsDefaultBranch,
-                    });
+                    const api = readNativeApi();
+                    if (!api) return;
+                    closeResultToast();
+                    void api.shell.openExternal(prUrl);
                   },
                 },
               }
-            : shouldOfferOpenPrCta
+            : shouldOfferCreatePrCta
               ? {
                   actionProps: {
-                    children: gitCopy.viewPrAction,
+                    children: gitCopy.createPrAction,
                     onClick: () => {
-                      const api = readNativeApi();
-                      if (!api) return;
                       closeResultToast();
-                      void api.shell.openExternal(prUrl);
+                      void runGitActionWithToast({
+                        action: "commit_push_pr",
+                        forcePushOnlyProgress: true,
+                        statusOverride: actionStatus,
+                        isDefaultBranchOverride: actionIsDefaultBranch,
+                      });
                     },
                   },
                 }
-              : shouldOfferCreatePrCta
-                ? {
-                    actionProps: {
-                      children: gitCopy.createPrAction,
-                      onClick: () => {
-                        closeResultToast();
-                        void runGitActionWithToast({
-                          action: "commit_push_pr",
-                          forcePushOnlyProgress: true,
-                          statusOverride: actionStatus,
-                          isDefaultBranchOverride: actionIsDefaultBranch,
-                        });
-                      },
-                    },
-                  }
-                : {}),
+              : {}),
         });
       } catch (err) {
         stopProgressUpdates();

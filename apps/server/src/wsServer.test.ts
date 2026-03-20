@@ -410,6 +410,7 @@ async function rewriteKeybindingsAndWaitForPush(
 async function requestPath(
   port: number,
   requestPath: string,
+  headers?: Record<string, string>,
 ): Promise<{ statusCode: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = Http.request(
@@ -418,6 +419,7 @@ async function requestPath(
         port,
         path: requestPath,
         method: "GET",
+        ...(headers ? { headers } : {}),
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -676,6 +678,28 @@ describe("WebSocket Server", () => {
     expect(await authorized.text()).toBe("hello-attachment");
   });
 
+  it("rejects attachment routes from unexpected browser origins in unauthenticated web mode", async () => {
+    const stateDir = makeTempDir("cut3-state-attachments-origin-");
+    const attachmentPath = path.join(stateDir, "attachments", "thread-a", "message-a", "0.png");
+    fs.mkdirSync(path.dirname(attachmentPath), { recursive: true });
+    fs.writeFileSync(attachmentPath, Buffer.from("hello-attachment"));
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      stateDir,
+      host: "0.0.0.0",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await requestPath(port, "/attachments/thread-a/message-a/0.png", {
+      Origin: `http://192.168.1.42:${port}`,
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain("Forbidden attachment request");
+  });
+
   it("requires auth for project favicon requests and limits them to authorized workspaces", async () => {
     const workspace = makeTempDir("cut3-project-favicon-auth-");
     const outside = makeTempDir("cut3-project-favicon-auth-outside-");
@@ -709,6 +733,29 @@ describe("WebSocket Server", () => {
     );
     expect(authorized.statusCode).toBe(200);
     expect(authorized.body).toBe("<svg>workspace</svg>");
+  });
+
+  it("rejects project favicon requests from unexpected browser origins in unauthenticated web mode", async () => {
+    const workspace = makeTempDir("cut3-project-favicon-origin-");
+    fs.writeFileSync(path.join(workspace, "favicon.svg"), "<svg>workspace</svg>", "utf8");
+
+    server = await createTestServer({
+      cwd: workspace,
+      host: "0.0.0.0",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await requestPath(
+      port,
+      `/api/project-favicon?cwd=${encodeURIComponent(workspace)}`,
+      {
+        Origin: `http://192.168.1.42:${port}`,
+      },
+    );
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain("Forbidden project favicon request");
   });
 
   it("serves static index for root path", async () => {

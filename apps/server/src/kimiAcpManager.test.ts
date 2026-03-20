@@ -153,8 +153,47 @@ describe("kimiAcpManager model availability", () => {
         },
       }),
     ).toBe(
-      "Kimi Code CLI requires authentication. Start `kimi`, run `/login`, or add a Kimi API key in CUT3 Settings and try again.",
+      "Kimi Code CLI requires authentication. Run `kimi login`, or start `kimi` and run `/login`, or add a Kimi API key in CUT3 Settings and try again.",
     );
+  });
+
+  it("treats starting sessions as active for hasSession checks", async () => {
+    const manager = new KimiAcpManager();
+    const threadId = ThreadId.makeUnsafe("thread-kimi-starting");
+
+    (manager as any).startingSessions.set(threadId, {
+      session: {
+        provider: "kimi",
+        status: "connecting",
+        runtimeMode: "approval-required",
+        threadId,
+        createdAt: "2026-03-19T00:00:00.000Z",
+        updatedAt: "2026-03-19T00:00:00.000Z",
+      },
+    });
+
+    await expect(manager.hasSession(threadId)).resolves.toBe(true);
+  });
+
+  it("stops sessions that are still starting", async () => {
+    const manager = new KimiAcpManager();
+    const threadId = ThreadId.makeUnsafe("thread-kimi-stop");
+    const context = {
+      session: {
+        provider: "kimi",
+        status: "connecting",
+        runtimeMode: "approval-required",
+        threadId,
+        createdAt: "2026-03-19T00:00:00.000Z",
+        updatedAt: "2026-03-19T00:00:00.000Z",
+      },
+    };
+    (manager as any).startingSessions.set(threadId, context);
+    const disposeContext = vi.spyOn(manager as any, "disposeContext").mockResolvedValue(undefined);
+
+    await manager.stopSession(threadId);
+
+    expect(disposeContext).toHaveBeenCalledWith(context);
   });
 
   it("rejects overlapping turns for the same Kimi session", async () => {

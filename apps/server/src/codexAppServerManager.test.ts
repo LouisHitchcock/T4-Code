@@ -863,6 +863,45 @@ describe("resolveCodexModelForAccount", () => {
 });
 
 describe("startSession", () => {
+  it("treats starting sessions as active for hasSession checks", () => {
+    const manager = new CodexAppServerManager();
+    const threadId = asThreadId("thread-starting");
+
+    (manager as any).startingSessions.set(threadId, {
+      session: {
+        provider: "codex",
+        status: "connecting",
+        runtimeMode: "full-access",
+        threadId,
+        createdAt: "2026-03-19T00:00:00.000Z",
+        updatedAt: "2026-03-19T00:00:00.000Z",
+      },
+    });
+
+    expect(manager.hasSession(threadId)).toBe(true);
+  });
+
+  it("stops sessions that are still starting", () => {
+    const manager = new CodexAppServerManager();
+    const threadId = asThreadId("thread-stop-starting");
+    const context = {
+      session: {
+        provider: "codex",
+        status: "connecting",
+        runtimeMode: "full-access",
+        threadId,
+        createdAt: "2026-03-19T00:00:00.000Z",
+        updatedAt: "2026-03-19T00:00:00.000Z",
+      },
+    };
+    (manager as any).startingSessions.set(threadId, context);
+    const stopContext = vi.spyOn(manager as any, "stopContext").mockImplementation(() => undefined);
+
+    manager.stopSession(threadId);
+
+    expect(stopContext).toHaveBeenCalledWith(context, "Session stopped");
+  });
+
   it("enables Codex experimental api capabilities during initialize", () => {
     expect(buildCodexInitializeParams()).toEqual({
       clientInfo: {

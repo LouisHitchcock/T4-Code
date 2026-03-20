@@ -689,9 +689,51 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     void Effect.runPromise(
       Effect.gen(function* () {
         const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+        const serverAddress = httpServer.address();
+        const listeningPort =
+          typeof serverAddress === "object" &&
+          serverAddress !== null &&
+          typeof serverAddress.port === "number"
+            ? serverAddress.port
+            : port;
+        const originHeader =
+          typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+        const remoteAddress = req.socket.remoteAddress;
+        const allowedWebSocketOrigins = buildAllowedWebSocketOrigins({
+          host,
+          port: listeningPort,
+          devUrl,
+          authToken,
+          mode: serverConfig.mode,
+        });
+        const rejectSensitiveHttpRequestIfUntrusted = (operation: string): boolean => {
+          if (authToken || serverConfig.mode !== "web") {
+            return false;
+          }
+          if (remoteAddress && !isLoopbackRemoteAddress(remoteAddress)) {
+            rejectHttpRequest(res, 403, `Forbidden ${operation} request`);
+            return true;
+          }
+          if (
+            originHeader &&
+            !isAllowedWebSocketOrigin({
+              originHeader,
+              allowedOrigins: allowedWebSocketOrigins,
+              allowMissingOrigin: false,
+              allowNullOrigin: false,
+            })
+          ) {
+            rejectHttpRequest(res, 403, `Forbidden ${operation} request`);
+            return true;
+          }
+          return false;
+        };
         if (url.pathname === "/api/project-favicon") {
           if (authToken && getWsAuthToken(url) !== authToken) {
             rejectHttpRequest(res, 401, "Unauthorized project favicon request");
+            return;
+          }
+          if (rejectSensitiveHttpRequestIfUntrusted("project favicon")) {
             return;
           }
 
@@ -733,6 +775,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         if (url.pathname.startsWith(ATTACHMENTS_ROUTE_PREFIX)) {
           if (authToken && getWsAuthToken(url) !== authToken) {
             rejectHttpRequest(res, 401, "Unauthorized attachment request");
+            return;
+          }
+          if (rejectSensitiveHttpRequestIfUntrusted("attachment")) {
             return;
           }
 

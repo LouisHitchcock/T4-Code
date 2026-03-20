@@ -12,13 +12,14 @@
 - Keep provider availability claims in docs and onboarding copy aligned with `apps/web/src/session-logic.ts` and its tests.
 - Keep chat timeline rendering consolidated in `apps/web/src/components/chat/MessagesTimeline.tsx`; do not reintroduce an inline `MessagesTimeline` copy inside `apps/web/src/components/ChatView.tsx`.
 - Keep OpenCode auth UX aligned with the real CLI surface: credentials are managed via `opencode auth login/logout`, while CUT3 only inspects OpenCode state and forwards the shared OpenRouter key to new OpenCode sessions as `OPENROUTER_API_KEY` when configured.
-- Keep Kimi auth UX aligned with the official Kimi CLI docs: user-facing guidance should point to starting `kimi` and running `/login`, or to the CUT3 Kimi API key setting, instead of assuming undocumented standalone auth commands.
+- Keep Kimi auth UX aligned with the official Kimi CLI docs: user-facing guidance should mention `kimi login` and the in-shell `/login` path, plus the CUT3 Kimi API key setting, instead of assuming only one auth flow.
 - Keep server-side fallback models aligned with `DEFAULT_MODEL_BY_PROVIDER` in `packages/contracts/src/model.ts`; do not hardcode older Codex defaults in bootstraps, managers, or internal helpers.
 - Do not leave ad-hoc provider `console.log` debugging in runtime managers; provider/account payloads can leak into server logs.
+- Keep provider event logging opt-in. Raw provider prompts, tool payloads, approval answers, and runtime output must not be persisted by default; use `CUT3_ENABLE_PROVIDER_EVENT_LOGS=1` only for deliberate local debugging.
 
 ## Project Snapshot
 
-CUT3 is a minimal web GUI for using coding agents. It currently supports Codex, GitHub Copilot, OpenCode, and Kimi Code, with unavailable picker placeholders for Claude Code and Cursor.
+CUT3 is a minimal web GUI for using coding agents. It currently supports Codex, GitHub Copilot, OpenCode, and Kimi Code, with a visible Gemini coming-soon entry plus unavailable picker placeholders for Claude Code and Cursor.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 

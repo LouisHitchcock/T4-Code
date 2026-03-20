@@ -257,8 +257,8 @@ describe("describeContextWindowState", () => {
         },
       }),
     ).toMatchObject({
-      totalTokens: 262_144,
-      totalLabel: "262K",
+      totalTokens: null,
+      totalLabel: null,
       usedTokens: 22_500,
       usedLabel: "22.5K",
       usageScope: "turn",

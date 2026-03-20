@@ -17,6 +17,7 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("gpt-5-codex")).toBe("gpt-5-codex");
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
+    expect(normalizeModelSlug("gemini-3-pro-preview", "copilot")).toBe("gemini-3-pro");
   });
 
   it("returns null for empty or missing values", () => {
@@ -62,6 +63,7 @@ describe("resolveModelSlug", () => {
     expect(getDefaultModel("copilot")).toBe(DEFAULT_MODEL_BY_PROVIDER.copilot);
     expect(getModelOptions("copilot")).toEqual(MODEL_OPTIONS_BY_PROVIDER.copilot);
     expect(resolveModelSlug("claude-sonnet-4.5", "copilot")).toBe("claude-sonnet-4.5");
+    expect(resolveModelSlug("gemini-3-pro", "copilot")).toBe("gemini-3-pro");
   });
 
   it("returns provider-specific defaults and catalogs for kimi", () => {
@@ -91,7 +93,7 @@ describe("getModelContextWindowInfo", () => {
     expect(getModelContextWindowInfo("gpt-5-codex", "codex")?.totalTokens).toBe(400_000);
     expect(getModelContextWindowInfo("gpt-5.4", "codex")?.totalTokens).toBe(1_000_000);
     expect(getModelContextWindowInfo("gpt-5.4", "copilot")?.totalTokens).toBe(1_000_000);
-    expect(getModelContextWindowInfo("kimi-for-coding", "kimi")?.totalTokens).toBe(262_144);
+    expect(getModelContextWindowInfo("kimi-for-coding", "kimi")?.totalTokens).toBeUndefined();
   });
 
   it("preserves unknown totals when only a note is documented", () => {

@@ -744,6 +744,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   async startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
     const threadId = input.threadId;
+    if (this.sessions.has(threadId) || this.startingSessions.has(threadId)) {
+      throw new Error(`Codex already has a session starting or running for thread '${threadId}'.`);
+    }
     const now = new Date().toISOString();
     let context: CodexSessionContext | undefined;
     const previousContext = this.sessions.get(threadId);
@@ -1245,7 +1248,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   stopSession(threadId: ThreadId): void {
-    const context = this.sessions.get(threadId);
+    const context = this.sessions.get(threadId) ?? this.startingSessions.get(threadId);
     if (!context) {
       return;
     }
@@ -1303,11 +1306,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   hasSession(threadId: ThreadId): boolean {
-    return this.sessions.has(threadId);
+    return this.sessions.has(threadId) || this.startingSessions.has(threadId);
   }
 
   stopAll(): void {
-    for (const threadId of this.sessions.keys()) {
+    for (const threadId of new Set([...this.sessions.keys(), ...this.startingSessions.keys()])) {
       this.stopSession(threadId);
     }
   }

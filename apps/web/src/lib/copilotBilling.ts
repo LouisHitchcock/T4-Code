@@ -6,8 +6,12 @@ const COPILOT_MODEL_MULTIPLIER_BY_SLUG = {
   "claude-opus-4.6-fast": 30,
   "claude-opus-4.5": 3,
   "claude-sonnet-4": 1,
-  "gemini-3-pro-preview": 1,
+  "gemini-2.5-pro": 1,
+  "gemini-3-flash": 0.33,
+  "gemini-3-pro": 1,
+  "gemini-3.1-pro": 1,
   "gpt-5.4": 1,
+  "gpt-5.4-mini": 0.33,
   "gpt-5.3-codex": 1,
   "gpt-5.2-codex": 1,
   "gpt-5.2": 1,
@@ -17,6 +21,8 @@ const COPILOT_MODEL_MULTIPLIER_BY_SLUG = {
   "gpt-5.1-codex-mini": 0.33,
   "gpt-5-mini": 0,
   "gpt-4.1": 0,
+  "grok-code-fast-1": 0.25,
+  "raptor-mini": 0,
 } as const satisfies Record<string, number>;
 
 export const COPILOT_PREMIUM_REQUEST_OVERAGE_USD = 0.04;

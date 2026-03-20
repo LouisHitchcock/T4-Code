@@ -193,6 +193,46 @@ describe("store pure functions", () => {
 });
 
 describe("store read model sync", () => {
+  it("preserves non-codex project default models from the read model", () => {
+    const initialState: AppState = {
+      projects: [],
+      threads: [],
+      threadsHydrated: true,
+    };
+    const readModel: OrchestrationReadModel = {
+      snapshotSequence: 1,
+      updatedAt: "2026-02-27T00:00:00.000Z",
+      projects: [
+        makeReadModelProject({
+          defaultModel: "minimax-coding-plan/MiniMax-M2.7",
+        }),
+      ],
+      threads: [],
+    };
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.projects[0]?.model).toBe("minimax-coding-plan/MiniMax-M2.7");
+  });
+
+  it("updates an existing project's default model from the latest read model", () => {
+    const initialState = makeState(makeThread());
+    const readModel: OrchestrationReadModel = {
+      snapshotSequence: 2,
+      updatedAt: "2026-02-27T00:00:01.000Z",
+      projects: [
+        makeReadModelProject({
+          defaultModel: "minimax-coding-plan/MiniMax-M2.7",
+        }),
+      ],
+      threads: [makeReadModelThread({ projectId: ProjectId.makeUnsafe("project-1") })],
+    };
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.projects[0]?.model).toBe("minimax-coding-plan/MiniMax-M2.7");
+  });
+
   it("falls back to the codex default for unsupported provider models without an active session", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(

@@ -1090,6 +1090,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activeLatestTurn?.completedAt) return;
     const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
     if (Number.isNaN(turnCompletedAt)) return;
+    const manualUnreadVisitedAt = new Date(turnCompletedAt - 1).toISOString();
+    if (activeThread.lastVisitedAt === manualUnreadVisitedAt) return;
     const lastVisitedAt = activeThread.lastVisitedAt ? Date.parse(activeThread.lastVisitedAt) : NaN;
     if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt) return;
 
@@ -6547,7 +6549,7 @@ function getProviderPickerSectionDescription(provider: AvailableProviderPickerKi
     case "copilot":
       return "GitHub Copilot chat models discovered from your local runtime.";
     case "kimi":
-      return "Kimi Code sessions backed by your configured Kimi API key.";
+      return "Kimi Code sessions backed by either your CLI login or a configured Kimi API key.";
     case "opencode":
       return "OpenCode models discovered from your local OpenCode runtime.";
     default:
@@ -6638,15 +6640,28 @@ function ProviderSetupDialog(props: {
               if (option.value === "kimi") {
                 badge = props.hasKimiApiKey
                   ? { label: "Key saved", variant: "success" }
-                  : { label: "Needs key", variant: "warning" };
+                  : providerStatus?.status === "ready"
+                    ? { label: "Ready", variant: "success" }
+                    : { label: "Needs auth", variant: "warning" };
                 description = props.hasKimiApiKey
                   ? "Kimi API key is configured for new Kimi Code sessions."
-                  : "Add a Kimi API key before starting Kimi Code sessions.";
+                  : "Authenticate in the Kimi CLI with `kimi login` or `/login`, or add an API key here.";
+                message = props.hasKimiApiKey
+                  ? "CUT3 will inject the saved Kimi API key into new Kimi Code sessions."
+                  : providerStatus?.message?.trim() ||
+                    "If you prefer not to store an API key in CUT3, you can log in through the local Kimi CLI and refresh this panel.";
                 action = (
                   <Button size="xs" variant="outline" onClick={props.onOpenKimiKeyDialog}>
                     <PlusIcon className="size-3.5" />
                     {props.hasKimiApiKey ? "Update key" : "Add key"}
                   </Button>
+                );
+                footer = (
+                  <p className="text-xs text-muted-foreground">
+                    Kimi also supports CLI auth via <code>kimi login</code> or the in-shell{" "}
+                    <code>/login</code> command. CUT3 reads the runtime state and can optionally
+                    inject a saved API key for new sessions.
+                  </p>
                 );
               }
 

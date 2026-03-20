@@ -4,7 +4,7 @@
   <img src="./CUT3.png" alt="CUT3" width="144" />
 </p>
 
-CUT3 is a minimal web GUI for coding agents. It currently supports Codex, GitHub Copilot, OpenCode, and Kimi Code. Claude Code and Cursor remain visible in the provider picker as unavailable placeholders.
+CUT3 is a minimal web GUI for coding agents. It currently supports Codex, GitHub Copilot, OpenCode, and Kimi Code. The picker also shows Gemini as coming soon, while Claude Code and Cursor remain unavailable placeholders.
 
 ## Screenshot
 
@@ -17,7 +17,7 @@ CUT3 is a minimal web GUI for coding agents. It currently supports Codex, GitHub
 - OpenCode
 - Kimi Code
 
-Claude Code and Cursor are intentionally shown in the provider picker as unavailable placeholders. They are not wired up for sessions yet.
+Gemini is intentionally shown as coming soon in the provider picker. Claude Code and Cursor are also visible there as unavailable placeholders. None of those three are wired up for sessions yet.
 
 ## How to use
 
@@ -86,7 +86,7 @@ Open Settings in the app to configure provider-specific behavior on the current 
 
 - **Appearance**: choose the base light/dark/system mode, switch to integrated presets like Lilac, and configure a custom chat background image with adjustable fade and blur.
 - **Language**: switch the settings experience and shared app shell between English and Persian. Persian also flips document direction and locale-aware time/date formatting in the web UI.
-- **Provider overrides**: set custom binary paths for Codex, Copilot, OpenCode, or Kimi, plus an optional Codex home path, a shared OpenRouter API key, and a Kimi API key. OpenCode authentication still happens outside CUT3 through `opencode auth login`, Kimi CLI authentication happens in Kimi itself through `/login` if you are not using an API key, and new OpenCode sessions now inherit that shared OpenRouter key as `OPENROUTER_API_KEY` when the OpenCode provider config expects it.
+- **Provider overrides**: set custom binary paths for Codex, Copilot, OpenCode, or Kimi, plus an optional Codex home path, a shared OpenRouter API key, and a Kimi API key. OpenCode authentication still happens outside CUT3 through `opencode auth login`, Kimi CLI authentication can use either `kimi login` or the in-shell `/login` flow when you are not using an API key, and new OpenCode sessions now inherit that shared OpenRouter key as `OPENROUTER_API_KEY` when the OpenCode provider config expects it.
 - **OpenRouter free models**: review the current OpenRouter entries that are explicitly free-locked and compatible with CUT3's native tool-calling path (`tools` plus `tool_choice`), keep the built-in `openrouter/free` router handy, and pin any listed model into the picker.
 - **Custom model slugs**: save extra model ids for GitHub Copilot, OpenCode, Kimi, custom Codex models, or current OpenRouter `:free` slugs so they appear in the model picker and `/model` suggestions.
 - **Picker controls**: the chat composer now uses a searchable grouped model picker with direct `Connect provider` and `Manage models` actions.

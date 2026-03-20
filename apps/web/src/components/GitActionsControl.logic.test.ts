@@ -447,15 +447,15 @@ describe("when: on default branch without open PR", () => {
 });
 
 describe("when: working tree has local changes and branch is behind upstream", () => {
-  it("resolveQuickAction still prefers commit, push, and create PR", () => {
+  it("resolveQuickAction falls back to commit instead of offering a blocked push or PR path", () => {
     const quick = resolveQuickAction(
       status({ hasWorkingTreeChanges: true, behindCount: 1 }),
       false,
     );
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push_pr",
-      label: "Commit, push & PR",
+      action: "commit",
+      label: "Commit",
     });
   });
 

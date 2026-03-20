@@ -575,6 +575,12 @@ export class CopilotAcpManager extends EventEmitter<CopilotAcpManagerEvents> {
   }
 
   async startSession(input: CopilotAppServerStartSessionInput): Promise<ProviderSession> {
+    if (this.sessions.has(input.threadId) || this.startingSessions.has(input.threadId)) {
+      throw new Error(
+        `GitHub Copilot already has a session starting or running for thread '${input.threadId}'.`,
+      );
+    }
+
     const resolvedCwd = input.cwd ?? process.cwd();
     const now = new Date().toISOString();
     const previousContext = this.sessions.get(input.threadId);
@@ -853,7 +859,7 @@ export class CopilotAcpManager extends EventEmitter<CopilotAcpManagerEvents> {
   }
 
   async stopSession(threadId: ThreadId): Promise<void> {
-    const context = this.sessions.get(threadId);
+    const context = this.sessions.get(threadId) ?? this.startingSessions.get(threadId);
     if (!context) {
       return;
     }
@@ -915,7 +921,7 @@ export class CopilotAcpManager extends EventEmitter<CopilotAcpManagerEvents> {
   }
 
   async hasSession(threadId: ThreadId): Promise<boolean> {
-    return this.sessions.has(threadId);
+    return this.sessions.has(threadId) || this.startingSessions.has(threadId);
   }
 
   async readThread(threadId: ThreadId): Promise<CopilotThreadSnapshot> {
@@ -931,7 +937,7 @@ export class CopilotAcpManager extends EventEmitter<CopilotAcpManagerEvents> {
   }
 
   async stopAll(): Promise<void> {
-    const threadIds = [...this.sessions.keys()];
+    const threadIds = [...new Set([...this.sessions.keys(), ...this.startingSessions.keys()])];
     await Promise.all(threadIds.map((threadId) => this.stopSession(threadId)));
   }
 }

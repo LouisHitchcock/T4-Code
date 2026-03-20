@@ -122,4 +122,18 @@ describe("ProviderSendTurnInput", () => {
     expect(parsed.modelOptions?.codex?.reasoningEffort).toBe("xhigh");
     expect(parsed.modelOptions?.codex?.fastMode).toBe(true);
   });
+
+  it("rejects unsupported copilot xhigh reasoning values", () => {
+    expect(() =>
+      decodeProviderSendTurnInput({
+        threadId: "thread-1",
+        model: "claude-sonnet-4.6",
+        modelOptions: {
+          copilot: {
+            reasoningEffort: "xhigh",
+          },
+        },
+      }),
+    ).toThrow();
+  });
 });

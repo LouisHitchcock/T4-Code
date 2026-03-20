@@ -3,9 +3,9 @@ import { ProviderKind } from "./orchestration";
 
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
-export const COPILOT_REASONING_EFFORT_VALUES = CODEX_REASONING_EFFORT_OPTIONS;
 export const COPILOT_REASONING_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
-export type CopilotReasoningEffort = (typeof COPILOT_REASONING_EFFORT_VALUES)[number];
+export const COPILOT_REASONING_EFFORT_VALUES = COPILOT_REASONING_EFFORT_OPTIONS;
+export type CopilotReasoningEffort = (typeof COPILOT_REASONING_EFFORT_OPTIONS)[number];
 export const OPENROUTER_FREE_ROUTER_MODEL = "openrouter/free" as const;
 export const OPENCODE_DEFAULT_MODEL = "opencode/default" as const;
 
@@ -43,9 +43,6 @@ const COPILOT_VENDOR_LIMIT_NOTE =
   "GitHub Copilot does not publish a separate context-window limit for this model; the total below comes from the model vendor docs.";
 const COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE =
   "Anthropic documents a 200K standard window and 1M beta access for some API setups. GitHub Copilot does not publish whether that extended path is enabled.";
-const COPILOT_GEMINI_PREVIEW_NOTE =
-  "Google documented Gemini 3 Pro at a 1M input window before deprecating the preview model. GitHub Copilot does not publish a separate limit for its Gemini 3 Pro offering.";
-
 export const MODEL_OPTIONS_BY_PROVIDER = {
   codex: [
     { slug: "gpt-5.4", name: "GPT-5.4" },
@@ -64,8 +61,12 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "claude-opus-4.6-fast", name: "Claude Opus 4.6 Fast" },
     { slug: "claude-opus-4.5", name: "Claude Opus 4.5" },
     { slug: "claude-sonnet-4", name: "Claude Sonnet 4" },
-    { slug: "gemini-3-pro-preview", name: "Gemini 3 Pro Preview" },
+    { slug: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { slug: "gemini-3-flash", name: "Gemini 3 Flash" },
+    { slug: "gemini-3-pro", name: "Gemini 3 Pro" },
+    { slug: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
     { slug: "gpt-5.4", name: "GPT-5.4" },
+    { slug: "gpt-5.4-mini", name: "GPT-5.4 mini" },
     { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
     { slug: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
     { slug: "gpt-5.2", name: "GPT-5.2" },
@@ -75,6 +76,9 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini" },
     { slug: "gpt-5-mini", name: "GPT-5 Mini" },
     { slug: "gpt-4.1", name: "GPT-4.1" },
+    { slug: "grok-code-fast-1", name: "Grok Code Fast 1" },
+    { slug: "raptor-mini", name: "Raptor mini" },
+    { slug: "goldeneye", name: "Goldeneye" },
   ],
   kimi: [{ slug: "kimi-for-coding", name: "Kimi for Coding" }],
   opencode: [{ slug: OPENCODE_DEFAULT_MODEL, name: "Default" }],
@@ -159,11 +163,6 @@ export const MODEL_CONTEXT_WINDOW_INFO_BY_PROVIDER = {
       source: "vendor-doc",
       note: COPILOT_ANTHROPIC_LONG_CONTEXT_NOTE,
     },
-    "gemini-3-pro-preview": {
-      totalTokens: 1_000_000,
-      source: "vendor-doc",
-      note: COPILOT_GEMINI_PREVIEW_NOTE,
-    },
     "gpt-5.4": {
       totalTokens: 1_000_000,
       source: "vendor-doc",
@@ -217,9 +216,8 @@ export const MODEL_CONTEXT_WINDOW_INFO_BY_PROVIDER = {
   },
   kimi: {
     "kimi-for-coding": {
-      totalTokens: 262_144,
       source: "provider-config",
-      note: "The Kimi integration configures a default max_context_size of 262,144 tokens.",
+      note: "CUT3 only writes a 262,144-token max_context_size when launching an API-key-backed Kimi temp config. Login-backed sessions rely on the runtime's own config and may differ.",
     },
   },
   opencode: {
@@ -238,7 +236,9 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
-  copilot: {},
+  copilot: {
+    "gemini-3-pro-preview": "gemini-3-pro",
+  },
   kimi: {},
   opencode: {},
 } as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;

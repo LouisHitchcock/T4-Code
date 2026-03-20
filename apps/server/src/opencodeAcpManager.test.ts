@@ -1,7 +1,8 @@
-import { OPENCODE_DEFAULT_MODEL } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { OPENCODE_DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  OpenCodeAcpManager,
   buildOpenCodeCliArgs,
   buildOpenCodeCliEnv,
   isOpenCodeDefaultModel,
@@ -123,5 +124,46 @@ describe("opencodeAcpManager errors", () => {
     expect(
       normalizeOpenCodeStartErrorMessage("OpenCode ACP initialize timed out after 10000ms."),
     ).toBe("OpenCode ACP initialize timed out after 10000ms.");
+  });
+});
+
+describe("opencodeAcpManager lifecycle", () => {
+  it("treats starting sessions as active for hasSession checks", async () => {
+    const manager = new OpenCodeAcpManager();
+    const threadId = ThreadId.makeUnsafe("thread-opencode-starting");
+
+    (manager as any).startingSessions.set(threadId, {
+      session: {
+        provider: "opencode",
+        status: "connecting",
+        runtimeMode: "approval-required",
+        threadId,
+        createdAt: "2026-03-19T00:00:00.000Z",
+        updatedAt: "2026-03-19T00:00:00.000Z",
+      },
+    });
+
+    await expect(manager.hasSession(threadId)).resolves.toBe(true);
+  });
+
+  it("stops sessions that are still starting", async () => {
+    const manager = new OpenCodeAcpManager();
+    const threadId = ThreadId.makeUnsafe("thread-opencode-stop");
+    const context = {
+      session: {
+        provider: "opencode",
+        status: "connecting",
+        runtimeMode: "approval-required",
+        threadId,
+        createdAt: "2026-03-19T00:00:00.000Z",
+        updatedAt: "2026-03-19T00:00:00.000Z",
+      },
+    };
+    (manager as any).startingSessions.set(threadId, context);
+    const disposeContext = vi.spyOn(manager as any, "disposeContext").mockResolvedValue(undefined);
+
+    await manager.stopSession(threadId);
+
+    expect(disposeContext).toHaveBeenCalledWith(context);
   });
 });

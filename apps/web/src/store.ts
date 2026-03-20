@@ -9,7 +9,6 @@ import {
 import {
   getModelOptions,
   normalizeModelSlug,
-  resolveModelSlug,
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
 import { create } from "zustand";
@@ -132,6 +131,13 @@ function mapProjectsFromReadModel(
     persistedProjectOrderCwds.map((cwd, index) => [cwd, index] as const),
   );
   const usePersistedOrder = previous.length === 0;
+  const readProjectDefaultModel = (defaultModel: string | null | undefined): string => {
+    if (typeof defaultModel !== "string") {
+      return DEFAULT_MODEL_BY_PROVIDER.codex;
+    }
+    const trimmed = defaultModel.trim();
+    return trimmed.length > 0 ? trimmed : DEFAULT_MODEL_BY_PROVIDER.codex;
+  };
 
   const mappedProjects = incoming.map((project) => {
     const existing = previousById.get(project.id) ?? previousByCwd.get(project.workspaceRoot);
@@ -139,9 +145,7 @@ function mapProjectsFromReadModel(
       id: project.id,
       name: project.title,
       cwd: project.workspaceRoot,
-      model:
-        existing?.model ??
-        resolveModelSlug(project.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex),
+      model: readProjectDefaultModel(project.defaultModel),
       expanded:
         existing?.expanded ??
         (persistedExpandedProjectCwds.size > 0

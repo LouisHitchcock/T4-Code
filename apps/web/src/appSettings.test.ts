@@ -75,6 +75,8 @@ describe("getAppModelOptions", () => {
 
     expect(options.some((option) => option.slug === "claude-sonnet-4.5")).toBe(true);
     expect(options.some((option) => option.slug === "claude-sonnet-4.6")).toBe(true);
+    expect(options.some((option) => option.slug === "gemini-3-pro")).toBe(true);
+    expect(options.some((option) => option.slug === "gpt-5.4-mini")).toBe(true);
     expect(options.some((option) => option.slug === "gpt-5.4")).toBe(true);
     expect(options.some((option) => option.slug === "claude-opus-4.6")).toBe(true);
     expect(options.at(-1)).toEqual({

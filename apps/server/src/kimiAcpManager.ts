@@ -278,7 +278,7 @@ export function normalizeKimiStartErrorMessage(input: {
     ) ||
     (input.loginProbeOutput && isKimiLoginProbeUnauthenticated(input.loginProbeOutput))
   ) {
-    return "Kimi Code CLI requires authentication. Start `kimi`, run `/login`, or add a Kimi API key in CUT3 Settings and try again.";
+    return "Kimi Code CLI requires authentication. Run `kimi login`, or start `kimi` and run `/login`, or add a Kimi API key in CUT3 Settings and try again.";
   }
 
   return input.rawMessage;
@@ -663,6 +663,12 @@ export class KimiAcpManager extends EventEmitter<KimiAcpManagerEvents> {
   }
 
   async startSession(input: KimiAppServerStartSessionInput): Promise<ProviderSession> {
+    if (this.sessions.has(input.threadId) || this.startingSessions.has(input.threadId)) {
+      throw new Error(
+        `Kimi Code already has a session starting or running for thread '${input.threadId}'.`,
+      );
+    }
+
     const resolvedCwd = input.cwd ?? process.cwd();
     const now = new Date().toISOString();
     const previousContext = this.sessions.get(input.threadId);
@@ -935,7 +941,7 @@ export class KimiAcpManager extends EventEmitter<KimiAcpManagerEvents> {
   }
 
   async stopSession(threadId: ThreadId): Promise<void> {
-    const context = this.sessions.get(threadId);
+    const context = this.sessions.get(threadId) ?? this.startingSessions.get(threadId);
     if (!context) {
       return;
     }
@@ -987,7 +993,7 @@ export class KimiAcpManager extends EventEmitter<KimiAcpManagerEvents> {
   }
 
   async hasSession(threadId: ThreadId): Promise<boolean> {
-    return this.sessions.has(threadId);
+    return this.sessions.has(threadId) || this.startingSessions.has(threadId);
   }
 
   async readThread(threadId: ThreadId): Promise<KimiThreadSnapshot> {
@@ -1003,7 +1009,7 @@ export class KimiAcpManager extends EventEmitter<KimiAcpManagerEvents> {
   }
 
   async stopAll(): Promise<void> {
-    const threadIds = [...this.sessions.keys()];
+    const threadIds = [...new Set([...this.sessions.keys(), ...this.startingSessions.keys()])];
     await Promise.all(threadIds.map((threadId) => this.stopSession(threadId)));
   }
 }
