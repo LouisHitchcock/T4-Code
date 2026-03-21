@@ -18,6 +18,7 @@ import {
   ProjectAgentsFileResult,
   ProjectDraftAgentsFileResult,
   ProjectListCommandTemplatesResult,
+  ProjectListSkillsResult,
   ProjectSearchEntriesResult,
   ProjectWriteFileResult,
   ServerConfigUpdatedPayload,
@@ -28,6 +29,15 @@ import {
   ServerOpenCodeState,
   ServerUpsertKeybindingResult,
   TerminalSessionSnapshot,
+  ThreadCompactResult,
+  ThreadCreateShareResult,
+  ThreadGetShareResult,
+  ThreadRedoResult,
+  ThreadRedoStatusResult,
+  ThreadRevokeShareResult,
+  ThreadShareStatusResult,
+  ThreadUndoResult,
+  ThreadImportShareResult,
   WS_CHANNELS,
   WS_METHODS,
   type WsWelcomePayload,
@@ -183,8 +193,27 @@ export function createWsNativeApi(): NativeApi {
           ProjectListCommandTemplatesResult,
           input,
         ),
+      listSkills: (input) =>
+        requestWithSchema(WS_METHODS.projectsListSkills, ProjectListSkillsResult, input),
       writeFile: (input) =>
         requestWithSchema(WS_METHODS.projectsWriteFile, ProjectWriteFileResult, input),
+    },
+    threads: {
+      getShareStatus: (input) =>
+        requestWithSchema(WS_METHODS.threadsGetShareStatus, ThreadShareStatusResult, input),
+      createShare: (input) =>
+        requestWithSchema(WS_METHODS.threadsCreateShare, ThreadCreateShareResult, input),
+      getShare: (input) =>
+        requestWithSchema(WS_METHODS.threadsGetShare, ThreadGetShareResult, input),
+      revokeShare: (input) =>
+        requestWithSchema(WS_METHODS.threadsRevokeShare, ThreadRevokeShareResult, input),
+      importShare: (input) =>
+        requestWithSchema(WS_METHODS.threadsImportShare, ThreadImportShareResult, input),
+      compact: (input) => requestWithSchema(WS_METHODS.threadsCompact, ThreadCompactResult, input),
+      undo: (input) => requestWithSchema(WS_METHODS.threadsUndo, ThreadUndoResult, input),
+      redo: (input) => requestWithSchema(WS_METHODS.threadsRedo, ThreadRedoResult, input),
+      getRedoStatus: (input) =>
+        requestWithSchema(WS_METHODS.threadsGetRedoStatus, ThreadRedoStatusResult, input),
     },
     shell: {
       openInEditor: (cwd, editor) =>

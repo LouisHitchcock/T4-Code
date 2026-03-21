@@ -9,6 +9,7 @@ import {
   MessageId,
   NonNegativeInt,
   ProjectId,
+  ProjectSkillName,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -423,6 +424,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   serviceTier: Schema.optional(Schema.NullOr(ProviderServiceTier)),
   modelOptions: Schema.optional(ProviderModelOptions),
   providerOptions: Schema.optional(ProviderStartOptions),
+  skills: Schema.optional(Schema.Array(ProjectSkillName)),
   assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
@@ -446,6 +448,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   serviceTier: Schema.optional(Schema.NullOr(ProviderServiceTier)),
   modelOptions: Schema.optional(ProviderModelOptions),
   providerOptions: Schema.optional(ProviderStartOptions),
+  skills: Schema.optional(Schema.Array(ProjectSkillName)),
   assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -589,6 +592,33 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const OrchestrationThreadRestoreState = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  messages: Schema.Array(OrchestrationMessage),
+  proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
+  activities: Schema.Array(OrchestrationThreadActivity),
+  checkpoints: Schema.Array(OrchestrationCheckpointSummary),
+  session: Schema.NullOr(OrchestrationSession),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadRestoreState = typeof OrchestrationThreadRestoreState.Type;
+
+const ThreadRestoreCommand = Schema.Struct({
+  type: Schema.Literal("thread.restore"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  state: OrchestrationThreadRestoreState,
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -605,6 +635,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadRestoreCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -635,6 +666,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.restored",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -729,6 +761,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   serviceTier: Schema.optional(Schema.NullOr(ProviderServiceTier)),
   modelOptions: Schema.optional(ProviderModelOptions),
   providerOptions: Schema.optional(ProviderStartOptions),
+  skills: Schema.optional(Schema.Array(ProjectSkillName)),
   assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
@@ -797,6 +830,11 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
 export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
+});
+
+export const ThreadRestoredPayload = Schema.Struct({
+  threadId: ThreadId,
+  state: OrchestrationThreadRestoreState,
 });
 
 export const OrchestrationEventMetadata = Schema.Struct({
@@ -920,6 +958,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.restored"),
+    payload: ThreadRestoredPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

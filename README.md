@@ -51,15 +51,17 @@ Once the app is running, choose Codex, GitHub Copilot, OpenCode, or Kimi Code fr
 
 ## Workspace instructions and slash commands
 
-CUT3 now recognizes two repo-owned workspace surfaces:
+CUT3 now recognizes three repo-owned workspace surfaces:
 
 - `AGENTS.md` at the workspace root. When it exists, CUT3 wraps every new provider turn with those workspace instructions on the server side.
 - `.cut3/commands/*.md` for repo-local slash-command templates.
+- `.cut3/skills/<name>/SKILL.md` for repo-local skills that can be attached per turn from the composer.
 
 From the composer:
 
 - Run `/init` to create or update the workspace `AGENTS.md` through CUT3's guarded project write path.
 - Type `/` to see built-in commands plus any templates discovered from `.cut3/commands/*.md`.
+- Open the Skills picker to attach repo-local skills discovered from `.cut3/skills/<name>/SKILL.md`. Skill files must include `name` and `description` frontmatter, and `name` must match the lowercase hyphenated directory name.
 - Template frontmatter can set `description`, optional `provider`, optional `model`, optional `interactionMode`, optional `runtimeMode`, and optional `sendImmediately`.
 
 Template bodies support `$ARGUMENTS` plus positional placeholders `$1` through `$9`.
@@ -108,6 +110,7 @@ Open Settings in the app to configure provider-specific behavior on the current 
 - **Model visibility**: hide or restore discovered and saved models without deleting them; hidden models are removed from both the picker and `/model` suggestions until you show them again.
 - **Codex service tier**: choose `Automatic`, `Fast`, or `Flex` as the default service tier for new Codex turns.
 - **Per-turn controls**: the composer exposes provider-aware reasoning controls, and Codex also supports a per-turn `Fast Mode` toggle.
+- **Permission policies**: save persistent app-wide or project-scoped approval rules with `allow`, `ask`, or `deny` actions, request-kind filters, request-type/detail matching, and Build/Plan/Review presets.
 
 The chat model picker now shows OpenRouter as its own top-level section, with the built-in `openrouter/free` router plus the current OpenRouter `:free` models that CUT3 can safely use for native tool-calling turns. The picker is searchable, grouped by provider, and can open in-chat provider setup and model-management surfaces without sending you into Settings first.
 
@@ -120,9 +123,11 @@ The chat toolbar exposes two additional execution controls:
 - **Runtime mode**: choose `Full access` for direct execution or `Supervised` for in-app command/file approvals.
 - **Interaction mode**: switch between normal `Chat` turns and `Plan` turns for plan-first collaboration.
 
+Runtime mode sets the default sandbox and approval posture for new sessions. Persistent permission policies from Settings can still auto-allow, ask, or deny specific requests on top of that default when a provider raises an approval.
+
 When a plan is active, CUT3 can keep it open in a sidebar and export it by copying, downloading markdown, or saving it into the workspace.
 
-Threads also expose fork and export controls directly in the chat surface. Use the thread actions menu to fork the current thread or export the full thread as markdown or JSON, use `Fork thread here` on individual messages to branch from that point, and use the diff panel to fork from a completed checkpoint. When a provider emits task lifecycle events, CUT3 shows a compact task panel above the timeline.
+Threads also expose collaboration and history controls directly in the chat surface. Use the thread actions menu to share the current thread as a read-only snapshot, revoke an active share, compact the thread into a continuation summary, fork the current thread, or export the full thread as markdown or JSON. Shared snapshots open in a dedicated read-only route that can import the snapshot into another local project. Use `Undo` and `Redo` in the thread header to move through recent restore snapshots, use `Fork thread here` on individual messages to branch from that point, and use the diff panel to fork from a completed checkpoint. When a provider emits task lifecycle events, CUT3 shows a compact task panel above the timeline.
 
 For the full details, see [.docs/runtime-modes.md](.docs/runtime-modes.md).
 

@@ -9,6 +9,9 @@ import {
   type ProjectCommandTemplate,
   type ProjectId,
   type ProjectEntry,
+  type ProjectSkill,
+  type ProjectSkillIssue,
+  type ProjectSkillName,
   type ProjectScript,
   type ModelSlug,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -22,6 +25,7 @@ import {
   type ProviderKind,
   type ThreadForkSource,
   type ThreadId,
+  type ThreadShareSummary,
   type TurnId,
   OrchestrationThreadActivity,
   OPENROUTER_FREE_ROUTER_MODEL,
@@ -62,8 +66,19 @@ import {
   projectAgentsFileQueryOptions,
   projectCommandTemplatesQueryOptions,
   projectQueryKeys,
+  projectSkillsQueryOptions,
   projectSearchEntriesQueryOptions,
 } from "~/lib/projectReactQuery";
+import {
+  invalidateThreadQueries,
+  threadCompactMutationOptions,
+  threadCreateShareMutationOptions,
+  threadRedoMutationOptions,
+  threadRedoStatusQueryOptions,
+  threadRevokeShareMutationOptions,
+  threadShareStatusQueryOptions,
+  threadUndoMutationOptions,
+} from "~/lib/threadReactQuery";
 import {
   serverConfigQueryOptions,
   serverCopilotReasoningProbeQueryOptions,
@@ -186,6 +201,9 @@ import {
   XIcon,
   ZapIcon,
   CheckIcon,
+  RotateCcwIcon,
+  RotateCwIcon,
+  Share2Icon,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -237,6 +255,8 @@ import ProjectScriptsControl, { type NewProjectScriptInput } from "./ProjectScri
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ThreadTasksPanel } from "./chat/ThreadTasksPanel";
 import { ThreadExportDialog } from "./chat/ThreadExportDialog";
+import { ThreadShareDialog } from "./chat/ThreadShareDialog";
+import { ComposerSkillPicker } from "./chat/ComposerSkillPicker";
 import {
   commandForProjectScript,
   nextProjectScriptId,
@@ -290,6 +310,13 @@ import {
   resolveForkThreadDraftSettings,
   resolveLatestThreadForkSource,
 } from "../threadForking";
+import {
+  parseLatestResumeContextActivity,
+  parseLatestThreadImportActivity,
+  parseLatestThreadSkillsActivity,
+} from "../threadActivityMetadata";
+import { findMatchingApprovalRule, type ApprovalRule } from "../approvalRules";
+import { formatTimestamp } from "../timestampFormat";
 
 const LAST_EDITOR_KEY = "cut3:last-editor";
 const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "cut3:last-invoked-script-by-project";
@@ -301,6 +328,8 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROJECT_COMMAND_TEMPLATES: ProjectCommandTemplate[] = [];
+const EMPTY_PROJECT_SKILLS: ProjectSkill[] = [];
+const EMPTY_PROJECT_SKILL_ISSUES: ProjectSkillIssue[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
 const EMPTY_PROVIDER_MCP_STATUSES: ServerProviderMcpStatus[] = [];
@@ -829,8 +858,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerDraft = useComposerThreadDraft(threadId);
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
+  const selectedSkillNames = composerDraft.selectedSkills;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerDraftSelectedSkills = useComposerDraftStore((store) => store.setSelectedSkills);
   const setComposerDraftProvider = useComposerDraftStore((store) => store.setProvider);
   const setComposerDraftModel = useComposerDraftStore((store) => store.setModel);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
@@ -887,6 +918,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isForkingThread, setIsForkingThread] = useState(false);
+  const [isThreadShareDialogOpen, setIsThreadShareDialogOpen] = useState(false);
   const [isThreadExportDialogOpen, setIsThreadExportDialogOpen] = useState(false);
   const [threadExportFormat, setThreadExportFormat] = useState<ThreadExportFormat>("markdown");
   const [threadExportPath, setThreadExportPath] = useState("");
@@ -1013,6 +1045,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerDraftPrompt(threadId, nextPrompt);
     },
     [setComposerDraftPrompt, threadId],
+  );
+  const setSelectedSkills = useCallback(
+    (skills: ReadonlyArray<ProjectSkillName>) => {
+      setComposerDraftSelectedSkills(threadId, skills);
+    },
+    [setComposerDraftSelectedSkills, threadId],
+  );
+  const toggleSelectedSkill = useCallback(
+    (skillName: ProjectSkillName) => {
+      setSelectedSkills(
+        selectedSkillNames.includes(skillName)
+          ? selectedSkillNames.filter((entry) => entry !== skillName)
+          : [...selectedSkillNames, skillName],
+      );
+    },
+    [selectedSkillNames, setSelectedSkills],
+  );
+  const removeSelectedSkill = useCallback(
+    (skillName: ProjectSkillName) => {
+      setSelectedSkills(selectedSkillNames.filter((entry) => entry !== skillName));
+    },
+    [selectedSkillNames, setSelectedSkills],
   );
   const addComposerImage = useCallback(
     (image: ComposerImageAttachment) => {
@@ -1439,6 +1493,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerDraftModel(nextThreadId, forkThreadDraftSettings.model);
       setComposerDraftRuntimeMode(nextThreadId, forkThreadDraftSettings.runtimeMode);
       setComposerDraftInteractionMode(nextThreadId, forkThreadDraftSettings.interactionMode);
+      setComposerDraftSelectedSkills(nextThreadId, selectedSkillNames);
       setComposerDraftEffort(nextThreadId, selectedEffort);
       setComposerDraftCodexFastMode(
         nextThreadId,
@@ -1447,12 +1502,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       composerDraft.codexFastMode,
+      selectedSkillNames,
       selectedEffort,
       setComposerDraftCodexFastMode,
       setComposerDraftEffort,
       setComposerDraftInteractionMode,
       setComposerDraftModel,
       setComposerDraftProvider,
+      setComposerDraftSelectedSkills,
       setComposerDraftRuntimeMode,
     ],
   );
@@ -1794,6 +1851,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     latestTurnSettled &&
     activeProposedPlan !== null;
   const activePendingApproval = pendingApprovals[0] ?? null;
+  const activePendingApprovalRule = useMemo(
+    () =>
+      activePendingApproval
+        ? findMatchingApprovalRule({
+            rules: settings.approvalRules,
+            approval: activePendingApproval,
+            activeProjectId: activeProject?.id ?? null,
+          })
+        : null,
+    [activePendingApproval, activeProject?.id, settings.approvalRules],
+  );
   const isComposerApprovalState = activePendingApproval !== null;
   const hasComposerHeader =
     isComposerApprovalState ||
@@ -2163,6 +2231,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
   const gitCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
   const activeWorkspaceCwd = gitCwd ?? activeProject?.cwd ?? null;
+  const activeServerThreadId = serverThread?.id ?? null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
@@ -2179,9 +2248,50 @@ export default function ChatView({ threadId }: ChatViewProps) {
       cwd: activeWorkspaceCwd,
     }),
   );
+  const projectSkillsQuery = useQuery(
+    projectSkillsQueryOptions({
+      cwd: activeWorkspaceCwd,
+    }),
+  );
   const commandTemplatesQuery = useQuery(
     projectCommandTemplatesQueryOptions({
       cwd: activeWorkspaceCwd,
+    }),
+  );
+  const threadShareStatusQuery = useQuery(threadShareStatusQueryOptions(activeServerThreadId));
+  const threadRedoStatusQuery = useQuery(threadRedoStatusQueryOptions(activeServerThreadId));
+  const createThreadShareMutation = useMutation(
+    threadCreateShareMutationOptions({
+      threadId: activeServerThreadId,
+      queryClient,
+    }),
+  );
+  const revokeThreadShareMutation = useMutation(
+    threadRevokeShareMutationOptions({
+      shareId:
+        threadShareStatusQuery.data?.share && threadShareStatusQuery.data.share.revokedAt === null
+          ? threadShareStatusQuery.data.share.shareId
+          : null,
+      threadId: activeServerThreadId,
+      queryClient,
+    }),
+  );
+  const compactThreadMutation = useMutation(
+    threadCompactMutationOptions({
+      threadId: activeServerThreadId,
+      queryClient,
+    }),
+  );
+  const undoThreadMutation = useMutation(
+    threadUndoMutationOptions({
+      threadId: activeServerThreadId,
+      queryClient,
+    }),
+  );
+  const redoThreadMutation = useMutation(
+    threadRedoMutationOptions({
+      threadId: activeServerThreadId,
+      queryClient,
     }),
   );
   const workspaceEntriesQuery = useQuery(
@@ -2193,8 +2303,68 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const projectSkills = projectSkillsQuery.data?.skills ?? EMPTY_PROJECT_SKILLS;
+  const projectSkillIssues = projectSkillsQuery.data?.issues ?? EMPTY_PROJECT_SKILL_ISSUES;
   const projectCommandTemplates =
     commandTemplatesQuery.data?.commands ?? EMPTY_PROJECT_COMMAND_TEMPLATES;
+  const projectSkillsByName = useMemo(
+    () => new Map(projectSkills.map((skill) => [skill.name, skill] as const)),
+    [projectSkills],
+  );
+  const selectedSkillChips = useMemo(
+    () =>
+      selectedSkillNames.map((skillName) => ({
+        name: skillName,
+        description: projectSkillsByName.get(skillName)?.description ?? null,
+        available: projectSkillsByName.has(skillName),
+      })),
+    [projectSkillsByName, selectedSkillNames],
+  );
+  const activeShare =
+    threadShareStatusQuery.data?.share && threadShareStatusQuery.data.share.revokedAt === null
+      ? threadShareStatusQuery.data.share
+      : null;
+  const activeShareUrl = useMemo(() => buildSharedThreadUrl(activeShare), [activeShare]);
+  const latestResumeContext = useMemo(
+    () => parseLatestResumeContextActivity(activeThread?.activities ?? EMPTY_ACTIVITIES),
+    [activeThread?.activities],
+  );
+  const latestImportActivity = useMemo(
+    () => parseLatestThreadImportActivity(activeThread?.activities ?? EMPTY_ACTIVITIES),
+    [activeThread?.activities],
+  );
+  const latestSkillsActivity = useMemo(
+    () => parseLatestThreadSkillsActivity(activeThread?.activities ?? EMPTY_ACTIVITIES),
+    [activeThread?.activities],
+  );
+  const latestAppliedSkillChips = useMemo(
+    () =>
+      (latestSkillsActivity?.skills ?? []).map((skillName) => ({
+        name: skillName,
+        description: projectSkillsByName.get(skillName)?.description ?? null,
+      })),
+    [latestSkillsActivity?.skills, projectSkillsByName],
+  );
+  const canShareThread =
+    isServerThread && phase !== "running" && !isSendBusy && !isConnecting && !isRevertingCheckpoint;
+  const canCompactThread =
+    canShareThread && !compactThreadMutation.isPending && (activeThread?.messages.length ?? 0) > 0;
+  const canUndoThread =
+    isServerThread &&
+    (activeThread?.messages.length ?? 0) > 0 &&
+    phase !== "running" &&
+    !isSendBusy &&
+    !isConnecting &&
+    !isRevertingCheckpoint &&
+    !undoThreadMutation.isPending;
+  const canRedoThread =
+    isServerThread &&
+    threadRedoStatusQuery.data?.available === true &&
+    phase !== "running" &&
+    !isSendBusy &&
+    !isConnecting &&
+    !isRevertingCheckpoint &&
+    !redoThreadMutation.isPending;
   const providerMcpStatuses = useMemo<ServerProviderMcpStatus[]>(() => {
     const baseStatuses = serverConfigQuery.data?.mcpServers ?? EMPTY_PROVIDER_MCP_STATUSES;
     const mergedStatuses = new Map(baseStatuses.map((status) => [status.provider, status]));
@@ -3061,6 +3231,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     setExpandedWorkGroups({});
     setPullRequestDialogState(null);
+    setIsThreadShareDialogOpen(false);
     if (planSidebarOpenOnNextThreadRef.current) {
       planSidebarOpenOnNextThreadRef.current = false;
       setPlanSidebarOpen(true);
@@ -3625,6 +3796,161 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
   }, [activeWorkspaceCwd, queryClient]);
 
+  const openThreadShareDialog = useCallback(() => {
+    setIsThreadShareDialogOpen(true);
+  }, []);
+
+  const copyThreadShareLink = useCallback(async () => {
+    if (!activeShareUrl) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(activeShareUrl);
+      toastManager.add({
+        type: "success",
+        title: "Share link copied",
+        description: activeShareUrl,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not copy share link",
+        description: error instanceof Error ? error.message : "Clipboard access failed.",
+      });
+    }
+  }, [activeShareUrl]);
+
+  const openSharedThreadView = useCallback(() => {
+    if (!activeShare) {
+      return;
+    }
+    void navigate({
+      to: "/shared/$shareId",
+      params: { shareId: activeShare.shareId },
+    });
+  }, [activeShare, navigate]);
+
+  const createThreadShare = useCallback(async () => {
+    try {
+      const result = await createThreadShareMutation.mutateAsync();
+      setIsThreadShareDialogOpen(true);
+      toastManager.add({
+        type: "success",
+        title: "Share link created",
+        description: result.share.title,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not create share link",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    }
+  }, [createThreadShareMutation]);
+
+  const revokeThreadShare = useCallback(async () => {
+    if (!activeShare) {
+      return;
+    }
+    try {
+      await revokeThreadShareMutation.mutateAsync();
+      toastManager.add({
+        type: "success",
+        title: "Share link revoked",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not revoke share link",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    }
+  }, [activeShare, revokeThreadShareMutation]);
+
+  const compactThread = useCallback(async () => {
+    const api = readNativeApi();
+    if (!activeThread || !canCompactThread) {
+      return;
+    }
+    if (api) {
+      const confirmed = await api.dialogs.confirm(
+        [
+          "Compact this thread?",
+          "CUT3 will replace the live provider session with a continuation summary so the conversation can keep going from a smaller context.",
+        ].join("\n"),
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    try {
+      const result = await compactThreadMutation.mutateAsync();
+      toastManager.add({
+        type: "success",
+        title: "Thread compacted",
+        description: truncateTitle(result.summary),
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not compact thread",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    }
+  }, [activeThread, canCompactThread, compactThreadMutation]);
+
+  const undoThread = useCallback(async () => {
+    const api = readNativeApi();
+    if (!activeThread || !canUndoThread) {
+      return;
+    }
+    if (api) {
+      const confirmed = await api.dialogs.confirm(
+        [
+          "Undo the latest completed turn?",
+          "You can restore it with redo until you start a new turn.",
+        ].join("\n"),
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    try {
+      const result = await undoThreadMutation.mutateAsync();
+      toastManager.add({
+        type: "success",
+        title: "Last turn removed",
+        description:
+          result.redoDepth > 0 ? `${result.redoDepth} redo snapshot available.` : undefined,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not undo last turn",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    }
+  }, [activeThread, canUndoThread, undoThreadMutation]);
+
+  const redoThread = useCallback(async () => {
+    if (!activeThread || !canRedoThread) {
+      return;
+    }
+    try {
+      await redoThreadMutation.mutateAsync();
+      toastManager.add({
+        type: "success",
+        title: "Undo restored",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not redo thread state",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    }
+  }, [activeThread, canRedoThread, redoThreadMutation]);
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
@@ -3948,8 +4274,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
         runtimeMode: runtimeModeForSend,
         interactionMode: interactionModeForSend,
+        ...(selectedSkillNames.length > 0 ? { skills: selectedSkillNames } : {}),
         createdAt: messageCreatedAt,
       });
+      void invalidateThreadQueries(queryClient);
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
       if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
@@ -4075,6 +4403,51 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [setStoreThreadError, threadId],
   );
+
+  const autoHandledApprovalRuleRequestIdsRef = useRef<Set<ApprovalRequestId>>(new Set());
+  useEffect(() => {
+    const openRequestIds = new Set(pendingApprovals.map((approval) => approval.requestId));
+    for (const requestId of autoHandledApprovalRuleRequestIdsRef.current) {
+      if (!openRequestIds.has(requestId)) {
+        autoHandledApprovalRuleRequestIdsRef.current.delete(requestId);
+      }
+    }
+
+    for (const approval of pendingApprovals) {
+      if (
+        respondingRequestIds.includes(approval.requestId) ||
+        autoHandledApprovalRuleRequestIdsRef.current.has(approval.requestId)
+      ) {
+        continue;
+      }
+
+      const matchedRule = findMatchingApprovalRule({
+        rules: settings.approvalRules,
+        approval,
+        activeProjectId: activeProject?.id ?? null,
+      });
+      if (!matchedRule || matchedRule.action === "ask") {
+        continue;
+      }
+
+      autoHandledApprovalRuleRequestIdsRef.current.add(approval.requestId);
+      toastManager.add({
+        type: matchedRule.action === "allow" ? "success" : "warning",
+        title: matchedRule.action === "allow" ? "Approval auto-approved" : "Approval auto-denied",
+        description: matchedRule.label,
+      });
+      void onRespondToApproval(
+        approval.requestId,
+        matchedRule.action === "allow" ? "accept" : "decline",
+      );
+    }
+  }, [
+    activeProject?.id,
+    onRespondToApproval,
+    pendingApprovals,
+    respondingRequestIds,
+    settings.approvalRules,
+  ]);
 
   const onRespondToUserInput = useCallback(
     async (requestId: ApprovalRequestId, answers: Record<string, unknown>) => {
@@ -5040,8 +5413,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
+          onShareThread={openThreadShareDialog}
+          onCompactThread={() => {
+            void compactThread();
+          }}
+          onUndoThread={() => {
+            void undoThread();
+          }}
+          onRedoThread={() => {
+            void redoThread();
+          }}
           onForkThread={onForkCurrentThread}
           onExportThread={openThreadExportDialog}
+          canShareThread={canShareThread}
+          hasActiveShare={activeShare !== null}
+          canCompactThread={canCompactThread}
+          canUndoThread={canUndoThread}
+          canRedoThread={canRedoThread}
+          isCompactingThread={compactThreadMutation.isPending}
+          isUndoingThread={undoThreadMutation.isPending}
+          isRedoingThread={redoThreadMutation.isPending}
           canForkThread={isServerThread && !isForkingThread}
           canExportThread={isServerThread}
         />
@@ -5067,13 +5458,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
             {activeProviderStatus?.status !== "ready" ||
             activeModelRerouteNotice ||
-            activeThread.error ? (
+            activeThread.error ||
+            activeShare ||
+            latestResumeContext ||
+            latestImportActivity ||
+            latestAppliedSkillChips.length > 0 ||
+            threadRedoStatusQuery.data?.depth ? (
               <div data-chat-banner-stack="true" className="shrink-0 px-3 sm:px-5">
                 <ProviderHealthBanner status={activeProviderStatus} />
                 <ThreadModelRerouteBanner notice={activeModelRerouteNotice} />
                 <ThreadErrorBanner
                   error={activeThread.error}
                   onDismiss={() => setThreadError(activeThread.id, null)}
+                />
+                <ThreadFeatureBanners
+                  share={activeShare}
+                  shareUrl={activeShareUrl}
+                  latestResumeContext={latestResumeContext}
+                  latestImportActivity={latestImportActivity}
+                  latestAppliedSkills={latestAppliedSkillChips}
+                  redoDepth={threadRedoStatusQuery.data?.depth ?? 0}
+                  canRedoThread={canRedoThread}
+                  isRedoingThread={redoThreadMutation.isPending}
+                  timestampFormat={timestampFormat}
+                  onCopyShareLink={copyThreadShareLink}
+                  onManageShare={openThreadShareDialog}
+                  onRedoThread={() => {
+                    void redoThread();
+                  }}
                 />
               </div>
             ) : null}
@@ -5171,6 +5583,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                     <ComposerPendingApprovalPanel
                       approval={activePendingApproval}
+                      matchedRule={activePendingApprovalRule}
                       pendingCount={pendingApprovals.length}
                     />
                   </div>
@@ -5215,6 +5628,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       />
                     </div>
                   )}
+
+                  {!isComposerApprovalState &&
+                    pendingUserInputs.length === 0 &&
+                    selectedSkillChips.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {selectedSkillChips.map((skill) => (
+                          <button
+                            key={skill.name}
+                            type="button"
+                            onClick={() => removeSelectedSkill(skill.name)}
+                            className={cn(
+                              "app-interactive-motion inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+                              skill.available
+                                ? "border-amber-500/35 bg-amber-500/8 text-amber-500"
+                                : "border-warning/35 bg-warning/8 text-warning",
+                            )}
+                            title={
+                              skill.description ??
+                              "This skill is no longer available in the current workspace."
+                            }
+                          >
+                            <span className="truncate">{skill.name}</span>
+                            <XIcon className="size-3" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                   {!isComposerApprovalState &&
                     pendingUserInputs.length === 0 &&
@@ -5368,6 +5808,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         onOpenProviderSetup={openProviderSetupDialog}
                         onOpenManageModels={openManageModelsDialog}
                         onProviderModelChange={onProviderModelSelectFromPicker}
+                      />
+
+                      <ComposerSkillPicker
+                        skills={projectSkills}
+                        selectedSkillNames={selectedSkillNames}
+                        issuesCount={projectSkillIssues.length}
+                        disabled={!activeWorkspaceCwd || isConnecting || phase === "running"}
+                        compact={isComposerFooterCompact}
+                        onToggleSkill={toggleSelectedSkill}
                       />
 
                       <ComposerContextWindowStatus
@@ -5707,6 +6156,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
               onPrepared={handlePreparedPullRequestThread}
             />
           ) : null}
+          <ThreadShareDialog
+            open={isThreadShareDialogOpen}
+            onOpenChange={setIsThreadShareDialogOpen}
+            threadTitle={activeThread.title}
+            share={activeShare}
+            shareUrl={activeShareUrl}
+            isCreatingShare={createThreadShareMutation.isPending}
+            isRevokingShare={revokeThreadShareMutation.isPending}
+            onCreateShare={() => {
+              void createThreadShare();
+            }}
+            onCopyLink={() => {
+              void copyThreadShareLink();
+            }}
+            onOpenSharedView={openSharedThreadView}
+            onRevokeShare={() => {
+              void revokeThreadShare();
+            }}
+          />
           <ThreadExportDialog
             open={isThreadExportDialogOpen}
             onOpenChange={(open) => {
@@ -6032,15 +6500,33 @@ interface ChatHeaderProps {
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
+  onShareThread: () => void;
+  onCompactThread: () => void;
+  onUndoThread: () => void;
+  onRedoThread: () => void;
   onForkThread: () => void;
   onExportThread: () => void;
+  canShareThread: boolean;
+  hasActiveShare: boolean;
+  canCompactThread: boolean;
+  canUndoThread: boolean;
+  canRedoThread: boolean;
+  isCompactingThread: boolean;
+  isUndoingThread: boolean;
+  isRedoingThread: boolean;
   canForkThread: boolean;
   canExportThread: boolean;
 }
 
 const ThreadHeaderActionsMenu = memo(function ThreadHeaderActionsMenu(props: {
+  onShareThread: () => void;
+  onCompactThread: () => void;
   onForkThread: () => void;
   onExportThread: () => void;
+  canShareThread: boolean;
+  hasActiveShare: boolean;
+  canCompactThread: boolean;
+  isCompactingThread: boolean;
   canForkThread: boolean;
   canExportThread: boolean;
 }) {
@@ -6050,6 +6536,13 @@ const ThreadHeaderActionsMenu = memo(function ThreadHeaderActionsMenu(props: {
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="end">
+        <MenuItem onClick={props.onShareThread} disabled={!props.canShareThread}>
+          {props.hasActiveShare ? "Manage share" : "Share thread"}
+        </MenuItem>
+        <MenuItem onClick={props.onCompactThread} disabled={!props.canCompactThread}>
+          {props.isCompactingThread ? "Compacting..." : "Compact thread"}
+        </MenuItem>
+        <MenuDivider />
         <MenuItem onClick={props.onForkThread} disabled={!props.canForkThread}>
           Fork thread
         </MenuItem>
@@ -6079,8 +6572,20 @@ const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleDiff,
+  onShareThread,
+  onCompactThread,
+  onUndoThread,
+  onRedoThread,
   onForkThread,
   onExportThread,
+  canShareThread,
+  hasActiveShare,
+  canCompactThread,
+  canUndoThread,
+  canRedoThread,
+  isCompactingThread,
+  isUndoingThread,
+  isRedoingThread,
   canForkThread,
   canExportThread,
 }: ChatHeaderProps) {
@@ -6126,9 +6631,41 @@ const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="shrink-0"
+          onClick={onUndoThread}
+          disabled={!canUndoThread}
+        >
+          <RotateCcwIcon className="size-3.5" />
+          <span className="sr-only @lg/header-actions:not-sr-only">
+            {isUndoingThread ? "Undoing..." : "Undo"}
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="shrink-0"
+          onClick={onRedoThread}
+          disabled={!canRedoThread}
+        >
+          <RotateCwIcon className="size-3.5" />
+          <span className="sr-only @lg/header-actions:not-sr-only">
+            {isRedoingThread ? "Redoing..." : "Redo"}
+          </span>
+        </Button>
         <ThreadHeaderActionsMenu
+          onShareThread={onShareThread}
+          onCompactThread={onCompactThread}
           onForkThread={onForkThread}
           onExportThread={onExportThread}
+          canShareThread={canShareThread}
+          hasActiveShare={hasActiveShare}
+          canCompactThread={canCompactThread}
+          isCompactingThread={isCompactingThread}
           canForkThread={canForkThread}
           canExportThread={canExportThread}
         />
@@ -6190,6 +6727,158 @@ const ThreadErrorBanner = memo(function ThreadErrorBanner({
         )}
       </Alert>
     </div>
+  );
+});
+
+function buildSharedThreadUrl(share: ThreadShareSummary | null): string | null {
+  if (!share) {
+    return null;
+  }
+  const relativePath = `/shared/${share.shareId}`;
+  if (typeof window === "undefined") {
+    return relativePath;
+  }
+  try {
+    return new URL(relativePath, window.location.origin).toString();
+  } catch {
+    return relativePath;
+  }
+}
+
+function getResumeContextBannerTitle(input: { source: string | null; importedFromShare: boolean }) {
+  if (input.importedFromShare) {
+    return "Imported from shared thread";
+  }
+  switch (input.source) {
+    case "compact":
+      return "Thread compacted";
+    case "redo":
+      return "Undo restored";
+    default:
+      return "Continuation summary active";
+  }
+}
+
+const ThreadFeatureBanners = memo(function ThreadFeatureBanners(props: {
+  share: ThreadShareSummary | null;
+  shareUrl: string | null;
+  latestResumeContext: ReturnType<typeof parseLatestResumeContextActivity>;
+  latestImportActivity: ReturnType<typeof parseLatestThreadImportActivity>;
+  latestAppliedSkills: ReadonlyArray<{ name: ProjectSkillName; description: string | null }>;
+  redoDepth: number;
+  canRedoThread: boolean;
+  isRedoingThread: boolean;
+  timestampFormat: AppSettings["timestampFormat"];
+  onCopyShareLink: () => void;
+  onManageShare: () => void;
+  onRedoThread: () => void;
+}) {
+  if (
+    !props.share &&
+    !props.latestResumeContext &&
+    props.latestAppliedSkills.length === 0 &&
+    props.redoDepth === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <>
+      {props.share && props.shareUrl ? (
+        <div className="mx-auto max-w-3xl pt-3">
+          <Alert variant="info">
+            <Share2Icon />
+            <AlertTitle>Shared snapshot available</AlertTitle>
+            <AlertDescription>
+              <div>
+                Read-only link created{" "}
+                {formatTimestamp(props.share.createdAt, props.timestampFormat)}.
+              </div>
+              <div className="truncate text-xs text-muted-foreground/75" title={props.shareUrl}>
+                {props.shareUrl}
+              </div>
+            </AlertDescription>
+            <AlertAction>
+              <Button type="button" variant="outline" size="sm" onClick={props.onManageShare}>
+                Manage
+              </Button>
+              <Button type="button" size="sm" onClick={props.onCopyShareLink}>
+                Copy link
+              </Button>
+            </AlertAction>
+          </Alert>
+        </div>
+      ) : null}
+
+      {props.latestResumeContext ? (
+        <div className="mx-auto max-w-3xl pt-3">
+          <Alert variant="info">
+            <RefreshCwIcon />
+            <AlertTitle>
+              {getResumeContextBannerTitle({
+                source: props.latestResumeContext.source,
+                importedFromShare: props.latestImportActivity !== null,
+              })}
+            </AlertTitle>
+            <AlertDescription>
+              <div className="line-clamp-4" title={props.latestResumeContext.summary}>
+                {props.latestResumeContext.summary}
+              </div>
+              <div className="text-xs text-muted-foreground/75">
+                Updated{" "}
+                {formatTimestamp(props.latestResumeContext.compactedAt, props.timestampFormat)}
+                {props.latestImportActivity?.shareId
+                  ? ` • share ${props.latestImportActivity.shareId}`
+                  : ""}
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
+      {props.latestAppliedSkills.length > 0 ? (
+        <div className="mx-auto max-w-3xl pt-3">
+          <Alert variant="info">
+            <ZapIcon />
+            <AlertTitle>Skills applied on the latest turn</AlertTitle>
+            <AlertDescription>
+              <div className="flex flex-wrap gap-2">
+                {props.latestAppliedSkills.map((skill) => (
+                  <Badge key={skill.name} variant="secondary" className="max-w-full truncate">
+                    {skill.name}
+                  </Badge>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
+      {props.redoDepth > 0 ? (
+        <div className="mx-auto max-w-3xl pt-3">
+          <Alert variant="warning">
+            <RotateCwIcon />
+            <AlertTitle>Redo available</AlertTitle>
+            <AlertDescription>
+              <div>
+                {props.redoDepth} undone {props.redoDepth === 1 ? "turn" : "turns"} can still be
+                restored.
+              </div>
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                type="button"
+                size="sm"
+                onClick={props.onRedoThread}
+                disabled={!props.canRedoThread}
+              >
+                {props.isRedoingThread ? "Restoring..." : "Redo"}
+              </Button>
+            </AlertAction>
+          </Alert>
+        </div>
+      ) : null}
+    </>
   );
 });
 
@@ -6259,19 +6948,28 @@ const ProviderHealthBanner = memo(function ProviderHealthBanner({
 
 interface ComposerPendingApprovalPanelProps {
   approval: PendingApproval;
+  matchedRule: ApprovalRule | null;
   pendingCount: number;
+}
+
+function describePendingApprovalKind(approval: PendingApproval): string {
+  return approval.requestKind === "command"
+    ? "Command approval requested"
+    : approval.requestKind === "file-read"
+      ? "File-read approval requested"
+      : approval.requestKind === "file-change"
+        ? "File-change approval requested"
+        : approval.requestType
+          ? `Approval requested (${approval.requestType})`
+          : "Approval requested";
 }
 
 const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel({
   approval,
+  matchedRule,
   pendingCount,
 }: ComposerPendingApprovalPanelProps) {
-  const approvalSummary =
-    approval.requestKind === "command"
-      ? "Command approval requested"
-      : approval.requestKind === "file-read"
-        ? "File-read approval requested"
-        : "File-change approval requested";
+  const approvalSummary = describePendingApprovalKind(approval);
 
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
@@ -6282,6 +6980,14 @@ const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel(
           <span className="text-xs text-muted-foreground">1/{pendingCount}</span>
         ) : null}
       </div>
+      {matchedRule ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Matched rule: <span className="font-medium text-foreground">{matchedRule.label}</span>
+          {matchedRule.action === "ask"
+            ? " (still prompting because the rule action is Ask every time)."
+            : " (auto-response in progress)."}
+        </p>
+      ) : null}
     </div>
   );
 });

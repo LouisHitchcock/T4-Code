@@ -3,6 +3,7 @@ import {
   CommandId,
   EventId,
   type OrchestrationEvent,
+  type ProjectSkillName,
   type ProviderModelOptions,
   type ProviderKind,
   type ProviderServiceTier,
@@ -23,7 +24,11 @@ import { ProviderAdapterRequestError, ProviderServiceError } from "../../provide
 import { takeTransientTurnStartProviderOptions } from "../../provider/transientProviderOptions.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
-import { readProjectAgentsFile } from "../../projectWorkspaceMetadata.ts";
+import {
+  readProjectAgentsFile,
+  resolveProjectSkillSelection,
+} from "../../projectWorkspaceMetadata.ts";
+import { parseLatestResumeContext, THREAD_SKILLS_ACTIVITY_KIND } from "../../threadArtifacts.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ProviderCommandReactor,
@@ -65,6 +70,65 @@ function applyWorkspaceAgentsInstructions(input: {
     input.messageText,
     "</user_request>",
   ].join("\n");
+}
+
+function applyThreadTurnContext(input: {
+  readonly agentsContents: string | undefined;
+  readonly messageText: string;
+  readonly resumeSummary?: string | undefined;
+  readonly selectedSkills?: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string;
+    readonly contents: string;
+  }>;
+}): string {
+  const normalizedResumeSummary = input.resumeSummary?.trim();
+  const normalizedSkills = (input.selectedSkills ?? []).filter(
+    (skill) => skill.contents.trim().length > 0,
+  );
+  if (
+    (!normalizedResumeSummary || normalizedResumeSummary.length === 0) &&
+    normalizedSkills.length === 0
+  ) {
+    return applyWorkspaceAgentsInstructions({
+      agentsContents: input.agentsContents,
+      messageText: input.messageText,
+    });
+  }
+
+  const userRequest =
+    input.messageText.trim().length > 0
+      ? input.messageText
+      : "See the attached images and continue the conversation.";
+  const sections: string[] = [];
+  const agentsContents = input.agentsContents?.trim();
+  if (agentsContents && agentsContents.length > 0) {
+    sections.push(
+      '<workspace_instructions source="AGENTS.md">',
+      agentsContents,
+      "</workspace_instructions>",
+    );
+  }
+  if (normalizedResumeSummary && normalizedResumeSummary.length > 0) {
+    sections.push(
+      '<resume_context source="thread-summary">',
+      normalizedResumeSummary,
+      "</resume_context>",
+    );
+  }
+  if (normalizedSkills.length > 0) {
+    sections.push("<repo_skills>");
+    for (const skill of normalizedSkills) {
+      sections.push(
+        `<skill name="${skill.name}" description="${skill.description.replaceAll('"', "'")}">`,
+        skill.contents.trim(),
+        "</skill>",
+      );
+    }
+    sections.push("</repo_skills>");
+  }
+  sections.push("<user_request>", userRequest, "</user_request>");
+  return sections.join("\n\n");
 }
 
 function mapProviderSessionStatusToOrchestrationStatus(
@@ -369,7 +433,10 @@ const make = Effect.gen(function* () {
         modelChanged && (sessionModelSwitch === "restart-session" || codexRoutingChanged);
 
       if (!runtimeModeChanged && !providerChanged && !shouldRestartForModelChange) {
-        return existingSessionThreadId;
+        return {
+          threadId: existingSessionThreadId,
+          startedFresh: false,
+        };
       }
 
       const resumeCursor =
@@ -404,14 +471,20 @@ const make = Effect.gen(function* () {
       yield* bindSessionToThread(restartedSession, {
         preserveExistingTokenUsage: !providerChanged && !shouldRestartForModelChange,
       });
-      return restartedSession.threadId;
+      return {
+        threadId: restartedSession.threadId,
+        startedFresh: true,
+      };
     }
 
     const startedSession = yield* startProviderSession(
       options?.provider !== undefined ? { provider: options.provider } : undefined,
     );
     yield* bindSessionToThread(startedSession);
-    return startedSession.threadId;
+    return {
+      threadId: startedSession.threadId,
+      startedFresh: true,
+    };
   });
 
   const sendTurnForThread = Effect.fnUntraced(function* (input: {
@@ -423,6 +496,7 @@ const make = Effect.gen(function* () {
     readonly serviceTier?: ProviderServiceTier | null;
     readonly modelOptions?: ProviderModelOptions;
     readonly providerOptions?: ProviderStartOptions;
+    readonly skills?: ReadonlyArray<ProjectSkillName>;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
   }) {
@@ -441,17 +515,34 @@ const make = Effect.gen(function* () {
     if (input.providerOptions !== undefined) {
       threadProviderOptions.set(input.threadId, input.providerOptions);
     }
-    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+    const ensuredSession = yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.provider !== undefined ? { provider: input.provider } : {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
       ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
     });
+    const selectedSkills =
+      workspaceCwd && input.skills && input.skills.length > 0
+        ? resolveProjectSkillSelection({ cwd: workspaceCwd, skillNames: input.skills })
+        : [];
+    const resumeContext = ensuredSession.startedFresh
+      ? parseLatestResumeContext(thread.activities)
+      : null;
     const normalizedInput = toNonEmptyProviderInput(
-      applyWorkspaceAgentsInstructions({
+      applyThreadTurnContext({
         agentsContents:
           workspaceAgentsFile?.status === "available" ? workspaceAgentsFile.contents : undefined,
         messageText: input.messageText,
+        ...(resumeContext ? { resumeSummary: resumeContext.summary } : {}),
+        ...(selectedSkills.length > 0
+          ? {
+              selectedSkills: selectedSkills.map((entry) => ({
+                name: entry.skill.name,
+                description: entry.skill.description,
+                contents: entry.contents,
+              })),
+            }
+          : {}),
       }),
     );
     const normalizedAttachments = input.attachments ?? [];
@@ -633,6 +724,28 @@ const make = Effect.gen(function* () {
         ? (takeTransientTurnStartProviderOptions(event.commandId) ?? event.payload.providerOptions)
         : event.payload.providerOptions;
 
+    if (event.payload.skills && event.payload.skills.length > 0) {
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.activity.append",
+          commandId: serverCommandId("skills-applied"),
+          threadId: event.payload.threadId,
+          activity: {
+            id: EventId.makeUnsafe(crypto.randomUUID()),
+            tone: "info",
+            kind: THREAD_SKILLS_ACTIVITY_KIND,
+            summary: `Attached skills: ${event.payload.skills.join(", ")}`,
+            payload: {
+              skills: event.payload.skills,
+            },
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        })
+        .pipe(Effect.catch(() => Effect.void));
+    }
+
     yield* sendTurnForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
@@ -643,6 +756,7 @@ const make = Effect.gen(function* () {
         ? { modelOptions: event.payload.modelOptions }
         : {}),
       ...(providerOptions !== undefined ? { providerOptions } : {}),
+      ...(event.payload.skills !== undefined ? { skills: event.payload.skills } : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
     }).pipe(

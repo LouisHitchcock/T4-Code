@@ -17,6 +17,7 @@ import {
   CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
@@ -60,8 +61,18 @@ import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { searchWorkspaceEntries } from "./workspaceEntries";
 import {
+  buildThreadContinuationSummary,
+  buildThreadContinuationSummaryFromState,
+  buildThreadRestoreState,
+  buildThreadShareSnapshot,
+  parseLatestResumeContext,
+  THREAD_IMPORT_ACTIVITY_KIND,
+  THREAD_RESUME_CONTEXT_ACTIVITY_KIND,
+} from "./threadArtifacts";
+import {
   draftProjectAgentsFile,
   listProjectCommandTemplates,
+  listProjectSkills,
   readProjectAgentsFile,
 } from "./projectWorkspaceMetadata";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
@@ -105,6 +116,18 @@ import {
 import { isWithinAllowedRoot, resolvePathForContainmentCheck } from "./pathAuthorization";
 import { ProviderAdapterProcessError, ProviderAdapterRequestError } from "./provider/Errors.ts";
 import { putTransientTurnStartProviderOptions } from "./provider/transientProviderOptions.ts";
+import {
+  createThreadShare,
+  getActiveThreadShare,
+  getThreadShare,
+  revokeThreadShare,
+} from "./threadShareStore.ts";
+import {
+  clearThreadRedoSnapshots,
+  getThreadRedoStatus,
+  popThreadRedoSnapshot,
+  pushThreadRedoSnapshot,
+} from "./threadRedoStore.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -383,6 +406,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const gitManager = yield* GitManager;
   const terminalManager = yield* TerminalManager;
   const keybindingsManager = yield* Keybindings;
+  const providerService = yield* ProviderService;
   const providerHealth = yield* ProviderHealth;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -699,6 +723,84 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     return yield* new RouteRequestError({
       message: `${input.operation} is only allowed inside the current project, worktree, or trusted app paths.`,
     });
+  });
+
+  const resolveLiveThreadContext = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    const thread = snapshot.threads.find(
+      (entry) => entry.id === threadId && entry.deletedAt === null,
+    );
+    if (!thread) {
+      return yield* new RouteRequestError({
+        message: `Thread '${threadId}' was not found.`,
+      });
+    }
+    const project =
+      snapshot.projects.find(
+        (entry) => entry.id === thread.projectId && entry.deletedAt === null,
+      ) ?? null;
+    return {
+      snapshot,
+      thread,
+      project,
+    };
+  });
+
+  const resolveLiveProject = Effect.fnUntraced(function* (projectId: ProjectId) {
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    const project = snapshot.projects.find(
+      (entry) => entry.id === projectId && entry.deletedAt === null,
+    );
+    if (!project) {
+      return yield* new RouteRequestError({
+        message: `Project '${projectId}' was not found.`,
+      });
+    }
+    return project;
+  });
+
+  const stopProviderSessionForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const sessions = yield* providerService.listSessions();
+    if (!sessions.some((session) => session.threadId === threadId)) {
+      return;
+    }
+    yield* providerService.stopSession({ threadId }).pipe(Effect.catch(() => Effect.void));
+  });
+
+  const setStoppedThreadSession = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly createdAt: string;
+  }) {
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    const thread = snapshot.threads.find(
+      (entry) => entry.id === input.threadId && entry.deletedAt === null,
+    );
+    if (!thread?.session) {
+      return;
+    }
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe(`server:thread-session-stop:${crypto.randomUUID()}`),
+        threadId: input.threadId,
+        session: {
+          threadId: input.threadId,
+          status: "stopped",
+          providerName: thread.session.providerName,
+          runtimeMode: thread.runtimeMode,
+          activeTurnId: null,
+          lastError: null,
+          ...(thread.session.startedAt !== undefined
+            ? { startedAt: thread.session.startedAt }
+            : {}),
+          ...(thread.session.tokenUsage !== undefined
+            ? { tokenUsage: thread.session.tokenUsage }
+            : {}),
+          updatedAt: input.createdAt,
+        },
+        createdAt: input.createdAt,
+      })
+      .pipe(Effect.catch(() => Effect.void));
   });
 
   // HTTP server — serves static files or redirects to Vite dev server
@@ -1107,6 +1209,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             normalizedCommand.providerOptions,
           );
         }
+        if (normalizedCommand.type === "thread.turn.start") {
+          clearThreadRedoSnapshots({
+            stateDir: serverConfig.stateDir,
+            threadId: normalizedCommand.threadId,
+          });
+        }
         return yield* orchestrationEngine.dispatch(normalizedCommand);
       }
 
@@ -1192,6 +1300,21 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       }
 
+      case WS_METHODS.projectsListSkills: {
+        const body = stripRequestTag(request.body);
+        const authorizedWorkspaceRoot = yield* authorizePath({
+          requestedPath: body.cwd,
+          operation: "Project skill discovery",
+        });
+        return yield* Effect.try({
+          try: () => listProjectSkills({ ...body, cwd: authorizedWorkspaceRoot }),
+          catch: (cause) =>
+            new RouteRequestError({
+              message: `Failed to discover workspace skills: ${String(cause)}`,
+            }),
+        });
+      }
+
       case WS_METHODS.projectsWriteFile: {
         const body = stripRequestTag(request.body);
         const authorizedWorkspaceRoot = yield* authorizePath({
@@ -1222,6 +1345,281 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           ),
         );
         return { relativePath: target.relativePath };
+      }
+
+      case WS_METHODS.threadsGetShareStatus: {
+        const body = stripRequestTag(request.body);
+        yield* resolveLiveThreadContext(body.threadId);
+        return {
+          share: getActiveThreadShare({
+            stateDir: serverConfig.stateDir,
+            threadId: body.threadId,
+          }),
+        };
+      }
+
+      case WS_METHODS.threadsCreateShare: {
+        const body = stripRequestTag(request.body);
+        const { thread, project } = yield* resolveLiveThreadContext(body.threadId);
+        const createdAt = new Date().toISOString();
+        const share = createThreadShare({
+          stateDir: serverConfig.stateDir,
+          threadId: thread.id,
+          title: thread.title,
+          snapshot: buildThreadShareSnapshot({
+            thread,
+            project,
+            exportedAt: createdAt,
+          }),
+          createdAt,
+        });
+        return { share };
+      }
+
+      case WS_METHODS.threadsGetShare: {
+        const body = stripRequestTag(request.body);
+        const shareRecord = getThreadShare({
+          stateDir: serverConfig.stateDir,
+          shareId: body.shareId,
+        });
+        if (!shareRecord) {
+          return yield* new RouteRequestError({
+            message: `Shared thread '${body.shareId}' was not found or has been revoked.`,
+          });
+        }
+        return shareRecord;
+      }
+
+      case WS_METHODS.threadsRevokeShare: {
+        const body = stripRequestTag(request.body);
+        const revokedAt = new Date().toISOString();
+        const share = revokeThreadShare({
+          stateDir: serverConfig.stateDir,
+          shareId: body.shareId,
+          revokedAt,
+        });
+        if (!share) {
+          return yield* new RouteRequestError({
+            message: `Shared thread '${body.shareId}' was not found.`,
+          });
+        }
+        return { share };
+      }
+
+      case WS_METHODS.threadsImportShare: {
+        const body = stripRequestTag(request.body);
+        const shareRecord = getThreadShare({
+          stateDir: serverConfig.stateDir,
+          shareId: body.shareId,
+        });
+        if (!shareRecord) {
+          return yield* new RouteRequestError({
+            message: `Shared thread '${body.shareId}' was not found or has been revoked.`,
+          });
+        }
+        yield* resolveLiveProject(body.projectId);
+
+        const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
+        const createdAt = new Date().toISOString();
+        const restoredState = {
+          ...shareRecord.snapshot.state,
+          title: body.title ?? shareRecord.snapshot.state.title,
+          branch: null,
+          worktreePath: null,
+          session: null,
+          updatedAt: createdAt,
+        };
+        const resumeSummary =
+          parseLatestResumeContext(restoredState.activities)?.summary ??
+          buildThreadContinuationSummaryFromState(restoredState);
+
+        yield* orchestrationEngine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe(`server:thread-import:create:${crypto.randomUUID()}`),
+          threadId,
+          projectId: body.projectId,
+          title: restoredState.title,
+          model: restoredState.model,
+          runtimeMode: restoredState.runtimeMode,
+          interactionMode: restoredState.interactionMode,
+          branch: restoredState.branch,
+          worktreePath: restoredState.worktreePath,
+          createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.restore",
+          commandId: CommandId.makeUnsafe(`server:thread-import:restore:${crypto.randomUUID()}`),
+          threadId,
+          state: restoredState,
+          createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.makeUnsafe(`server:thread-import:activity:${crypto.randomUUID()}`),
+          threadId,
+          activity: {
+            id: EventId.makeUnsafe(`activity:${crypto.randomUUID()}`),
+            tone: "info",
+            kind: THREAD_IMPORT_ACTIVITY_KIND,
+            summary: "Imported shared thread",
+            payload: {
+              shareId: body.shareId,
+              sourceThreadId: shareRecord.snapshot.sourceThreadId,
+              importedAt: createdAt,
+            },
+            turnId: null,
+            createdAt,
+          },
+          createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.makeUnsafe(`server:thread-import:resume:${crypto.randomUUID()}`),
+          threadId,
+          activity: {
+            id: EventId.makeUnsafe(`activity:${crypto.randomUUID()}`),
+            tone: "info",
+            kind: THREAD_RESUME_CONTEXT_ACTIVITY_KIND,
+            summary: "Imported thread summary ready",
+            payload: {
+              summary: resumeSummary,
+              compactedAt: createdAt,
+              source: "share-import",
+            },
+            turnId: null,
+            createdAt,
+          },
+          createdAt,
+        });
+        return { threadId };
+      }
+
+      case WS_METHODS.threadsCompact: {
+        const body = stripRequestTag(request.body);
+        const { thread } = yield* resolveLiveThreadContext(body.threadId);
+        const compactedAt = new Date().toISOString();
+        const summary = buildThreadContinuationSummary(thread);
+        yield* stopProviderSessionForThread(body.threadId);
+        yield* setStoppedThreadSession({ threadId: body.threadId, createdAt: compactedAt });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.makeUnsafe(`server:thread-compact:${crypto.randomUUID()}`),
+          threadId: body.threadId,
+          activity: {
+            id: EventId.makeUnsafe(`activity:${crypto.randomUUID()}`),
+            tone: "info",
+            kind: THREAD_RESUME_CONTEXT_ACTIVITY_KIND,
+            summary: "Thread compacted",
+            payload: {
+              summary,
+              compactedAt,
+              source: "manual-compaction",
+            },
+            turnId: null,
+            createdAt: compactedAt,
+          },
+          createdAt: compactedAt,
+        });
+        return {
+          compactedAt,
+          summary,
+        };
+      }
+
+      case WS_METHODS.threadsUndo: {
+        const body = stripRequestTag(request.body);
+        const { thread } = yield* resolveLiveThreadContext(body.threadId);
+        const currentTurnCount = thread.checkpoints.reduce(
+          (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+          0,
+        );
+        if (currentTurnCount === 0 && thread.messages.length === 0) {
+          return yield* new RouteRequestError({
+            message: "This thread has no completed turns to undo.",
+          });
+        }
+        const createdAt = new Date().toISOString();
+        const redoStatus = pushThreadRedoSnapshot({
+          stateDir: serverConfig.stateDir,
+          threadId: body.threadId,
+          createdAt,
+          state: buildThreadRestoreState(thread),
+        });
+        const revertedToTurnCount = Math.max(0, currentTurnCount - 1);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.checkpoint.revert",
+          commandId: CommandId.makeUnsafe(`server:thread-undo:${crypto.randomUUID()}`),
+          threadId: body.threadId,
+          turnCount: revertedToTurnCount,
+          createdAt,
+        });
+        return {
+          revertedToTurnCount,
+          redoDepth: redoStatus.depth,
+        };
+      }
+
+      case WS_METHODS.threadsRedo: {
+        const body = stripRequestTag(request.body);
+        yield* resolveLiveThreadContext(body.threadId);
+        const popped = popThreadRedoSnapshot({
+          stateDir: serverConfig.stateDir,
+          threadId: body.threadId,
+        });
+        if (!popped.entry) {
+          return yield* new RouteRequestError({
+            message: "No redo state is available for this thread.",
+          });
+        }
+        const redoneAt = new Date().toISOString();
+        const restoredState = {
+          ...popped.entry.state,
+          session: null,
+          updatedAt: redoneAt,
+        };
+        const resumeSummary =
+          parseLatestResumeContext(restoredState.activities)?.summary ??
+          buildThreadContinuationSummaryFromState(restoredState);
+        yield* stopProviderSessionForThread(body.threadId);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.restore",
+          commandId: CommandId.makeUnsafe(`server:thread-redo:restore:${crypto.randomUUID()}`),
+          threadId: body.threadId,
+          state: restoredState,
+          createdAt: redoneAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.makeUnsafe(`server:thread-redo:resume:${crypto.randomUUID()}`),
+          threadId: body.threadId,
+          activity: {
+            id: EventId.makeUnsafe(`activity:${crypto.randomUUID()}`),
+            tone: "info",
+            kind: THREAD_RESUME_CONTEXT_ACTIVITY_KIND,
+            summary: "Redo restored thread summary",
+            payload: {
+              summary: resumeSummary,
+              compactedAt: redoneAt,
+              source: "redo",
+            },
+            turnId: null,
+            createdAt: redoneAt,
+          },
+          createdAt: redoneAt,
+        });
+        return {
+          redoneAt,
+          redoDepth: popped.depth,
+        };
+      }
+
+      case WS_METHODS.threadsGetRedoStatus: {
+        const body = stripRequestTag(request.body);
+        yield* resolveLiveThreadContext(body.threadId);
+        return getThreadRedoStatus({
+          stateDir: serverConfig.stateDir,
+          threadId: body.threadId,
+        });
       }
 
       case WS_METHODS.shellOpenInEditor: {

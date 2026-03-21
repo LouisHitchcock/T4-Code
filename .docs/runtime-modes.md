@@ -5,6 +5,8 @@ CUT3 has a global runtime mode switch in the chat toolbar:
 - **Full access** (default): starts sessions with `approvalPolicy: never` and `sandboxMode: danger-full-access`.
 - **Supervised**: starts sessions with `approvalPolicy: on-request` and `sandboxMode: workspace-write`, then prompts in-app for command/file approvals.
 
+Runtime mode sets the default sandbox and approval posture for a new session. Persistent permission policies from Settings can still auto-allow, ask, or deny specific requests after the provider raises an approval.
+
 ## Interaction modes
 
 The chat toolbar also has an interaction-mode toggle:
@@ -19,3 +21,12 @@ The plan sidebar also supports:
 - copying the current plan to the clipboard
 - downloading the plan as markdown
 - saving the plan into the current workspace
+
+## Thread controls
+
+The thread surface also exposes history and collaboration controls that build on top of runtime mode:
+
+- **Share / Revoke**: create or revoke a read-only shared snapshot. Shared links open in a dedicated route that can import the snapshot into another local project.
+- **Compact thread**: write a continuation-summary boundary so the thread can keep going with a smaller context footprint.
+- **Undo / Redo**: move through recent restore snapshots without manually selecting checkpoints.
+- **Fork / Export**: keep the existing fork and export controls from the thread actions menu, message actions, and diff panel.

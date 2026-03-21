@@ -25,6 +25,8 @@ import type {
   ProjectDraftAgentsFileResult,
   ProjectListCommandTemplatesInput,
   ProjectListCommandTemplatesResult,
+  ProjectListSkillsInput,
+  ProjectListSkillsResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -61,6 +63,26 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "./orchestration";
+import type {
+  ThreadCompactInput,
+  ThreadCompactResult,
+  ThreadCreateShareInput,
+  ThreadCreateShareResult,
+  ThreadGetShareInput,
+  ThreadGetShareResult,
+  ThreadImportShareInput,
+  ThreadImportShareResult,
+  ThreadRedoInput,
+  ThreadRedoResult,
+  ThreadRedoStatusInput,
+  ThreadRedoStatusResult,
+  ThreadRevokeShareInput,
+  ThreadRevokeShareResult,
+  ThreadShareStatusInput,
+  ThreadShareStatusResult,
+  ThreadUndoInput,
+  ThreadUndoResult,
+} from "./threadFeatures";
 import { EditorId } from "./editor";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -152,7 +174,19 @@ export interface NativeApi {
     listCommandTemplates: (
       input: ProjectListCommandTemplatesInput,
     ) => Promise<ProjectListCommandTemplatesResult>;
+    listSkills: (input: ProjectListSkillsInput) => Promise<ProjectListSkillsResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  threads: {
+    getShareStatus: (input: ThreadShareStatusInput) => Promise<ThreadShareStatusResult>;
+    createShare: (input: ThreadCreateShareInput) => Promise<ThreadCreateShareResult>;
+    getShare: (input: ThreadGetShareInput) => Promise<ThreadGetShareResult>;
+    revokeShare: (input: ThreadRevokeShareInput) => Promise<ThreadRevokeShareResult>;
+    importShare: (input: ThreadImportShareInput) => Promise<ThreadImportShareResult>;
+    compact: (input: ThreadCompactInput) => Promise<ThreadCompactResult>;
+    undo: (input: ThreadUndoInput) => Promise<ThreadUndoResult>;
+    redo: (input: ThreadRedoInput) => Promise<ThreadRedoResult>;
+    getRedoStatus: (input: ThreadRedoStatusInput) => Promise<ThreadRedoStatusResult>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;

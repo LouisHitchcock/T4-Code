@@ -3,6 +3,11 @@ import type { ProviderKind } from "@t3tools/contracts";
 import { summarizeTurnDiffStats } from "./lib/turnDiffTree";
 import type { ThreadTask, WorkLogEntry } from "./session-logic";
 import type { ChatAttachment, Project, Thread, TurnDiffSummary } from "./types";
+import {
+  parseLatestResumeContextActivity,
+  parseLatestThreadImportActivity,
+  parseLatestThreadSkillsActivity,
+} from "./threadActivityMetadata";
 
 export type ThreadExportFormat = "markdown" | "json";
 
@@ -63,6 +68,10 @@ function checkpointExportSummary(summary: TurnDiffSummary) {
 }
 
 function serializeThreadExport(input: BuildThreadExportInput) {
+  const latestResumeContext = parseLatestResumeContextActivity(input.thread.activities);
+  const latestImportActivity = parseLatestThreadImportActivity(input.thread.activities);
+  const latestSkillsActivity = parseLatestThreadSkillsActivity(input.thread.activities);
+
   return {
     version: 1,
     exportedAt: input.exportedAt,
@@ -79,6 +88,11 @@ function serializeThreadExport(input: BuildThreadExportInput) {
       worktreePath: input.thread.worktreePath,
       createdAt: input.thread.createdAt,
       latestTurn: input.thread.latestTurn,
+    },
+    threadFeatures: {
+      continuationSummary: latestResumeContext,
+      importedFromShare: latestImportActivity,
+      latestAppliedSkills: latestSkillsActivity,
     },
     messages: input.thread.messages.map((message) => ({
       id: message.id,
@@ -111,6 +125,49 @@ function serializeThreadExport(input: BuildThreadExportInput) {
     diffSummaries: input.thread.turnDiffSummaries.map(checkpointExportSummary),
     attachments: collectAttachmentMetadata(input.thread),
   };
+}
+
+function buildThreadFeatureMarkdown(thread: Thread): string {
+  const latestResumeContext = parseLatestResumeContextActivity(thread.activities);
+  const latestImportActivity = parseLatestThreadImportActivity(thread.activities);
+  const latestSkillsActivity = parseLatestThreadSkillsActivity(thread.activities);
+  const lines: string[] = [];
+
+  if (latestResumeContext) {
+    lines.push("### Continuation Summary");
+    lines.push(`Updated: ${latestResumeContext.compactedAt}`);
+    if (latestResumeContext.source) {
+      lines.push(`Source: ${latestResumeContext.source}`);
+    }
+    lines.push("");
+    lines.push(latestResumeContext.summary);
+    lines.push("");
+  }
+
+  if (latestImportActivity) {
+    lines.push("### Shared Import");
+    lines.push(`Imported at: ${latestImportActivity.importedAt}`);
+    if (latestImportActivity.shareId) {
+      lines.push(`Share ID: ${latestImportActivity.shareId}`);
+    }
+    if (latestImportActivity.sourceThreadId) {
+      lines.push(`Source thread: ${latestImportActivity.sourceThreadId}`);
+    }
+    lines.push("");
+  }
+
+  if (latestSkillsActivity && latestSkillsActivity.skills.length > 0) {
+    lines.push("### Latest Applied Skills");
+    lines.push(`Applied at: ${latestSkillsActivity.createdAt}`);
+    for (const skillName of latestSkillsActivity.skills) {
+      lines.push(`- ${skillName}`);
+    }
+    lines.push("");
+  }
+
+  return lines.length > 0
+    ? lines.join("\n").trimEnd()
+    : "No continuation, import, or skill metadata.";
 }
 
 function buildMessageMarkdown(message: Thread["messages"][number]): string {
@@ -219,6 +276,10 @@ function buildThreadExportMarkdown(input: BuildThreadExportInput): string {
   if (input.thread.worktreePath) {
     sections.push(`- Worktree: ${input.thread.worktreePath}`);
   }
+  sections.push("");
+  sections.push("## Thread Features");
+  sections.push("");
+  sections.push(buildThreadFeatureMarkdown(input.thread));
   sections.push("");
   sections.push("## Conversation");
   sections.push("");

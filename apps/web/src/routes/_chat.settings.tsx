@@ -32,6 +32,7 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
 import { AppearanceSettingsSection } from "../components/AppearanceSettingsSection";
 import { OpenCodeCredentialsManager } from "../components/OpenCodeCredentialsManager";
+import { PermissionPoliciesSection } from "../components/settings/PermissionPoliciesSection";
 import ThreadNewButton from "../components/ThreadNewButton";
 import ThreadSidebarToggle from "../components/ThreadSidebarToggle";
 import { Button } from "../components/ui/button";
@@ -45,6 +46,8 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { APP_VERSION } from "../branding";
+import { useStore } from "../store";
+import { getLatestServerWelcome } from "../wsNativeApi";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 const MODEL_PROVIDER_SETTINGS: Array<{
@@ -518,6 +521,7 @@ function renderCapabilityBadge(label: string) {
 
 function SettingsRouteView() {
   const { settings, defaults, updateSettings } = useAppSettings();
+  const projects = useStore((store) => store.projects);
   const copy = useMemo(() => getSettingsCopy(settings.language), [settings.language]);
   const languageLocale = getAppLanguageDetails(settings.language).locale;
   const settingsDirection = getAppLanguageDetails(settings.language).dir;
@@ -564,6 +568,13 @@ function SettingsRouteView() {
   const openRouterCatalogModelCount = compatibleOpenRouterFreeModels.filter(
     (model) => model.source === "catalog",
   ).length;
+  const latestWelcome = getLatestServerWelcome();
+  const activeProjectId = useMemo(() => {
+    const fromCwd = latestWelcome?.cwd
+      ? (projects.find((project) => project.cwd === latestWelcome.cwd)?.id ?? null)
+      : null;
+    return fromCwd ?? latestWelcome?.bootstrapProjectId ?? null;
+  }, [latestWelcome?.bootstrapProjectId, latestWelcome?.cwd, projects]);
   const openRouterCustomModelInput = customModelInputByProvider.codex;
   const openRouterCustomModelError = customModelErrorByProvider.codex ?? null;
   const savedOpenRouterModels = settings.customCodexModels;
@@ -1738,6 +1749,14 @@ function SettingsRouteView() {
                 </div>
               ) : null}
             </section>
+
+            <PermissionPoliciesSection
+              rules={settings.approvalRules}
+              defaultRules={defaults.approvalRules}
+              projects={projects}
+              activeProjectId={activeProjectId}
+              onChangeRules={(approvalRules) => updateSettings({ approvalRules })}
+            />
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">

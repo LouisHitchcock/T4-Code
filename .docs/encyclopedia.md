@@ -6,6 +6,7 @@ This is a living glossary for CUT3. It explains what common terms mean in this c
 
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
+- [Composer and settings](#composer-and-settings)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
@@ -25,6 +26,10 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 #### Worktree
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live in [GitCore.ts][3].
+
+#### Repo-local skill
+
+A repo-owned instruction artifact discovered from `.cut3/skills/<name>/SKILL.md` and attachable per turn from the composer. Each skill must declare `name` and `description`, and `name` must match the lowercase hyphenated directory name. See [projectWorkspaceMetadata.ts][32] and [ComposerSkillPicker.tsx][33].
 
 ### Thread timeline
 
@@ -48,9 +53,35 @@ A new thread created from an existing thread's current state, a selected message
 
 A client-side snapshot of a thread that CUT3 can download as markdown or JSON, or save into the workspace. Exports include messages, proposed plans, derived tasks, curated work-log entries, checkpoint diff summaries, and attachment metadata. See [README.md][25].
 
+#### Shared thread
+
+A read-only snapshot of a thread exposed through a share id. Shared threads can be revoked and opened in a dedicated shared route instead of the normal editable thread view. See [threadShareStore.ts][29] and [shared.$shareId.tsx][27].
+
+#### Thread import
+
+A new local thread created from a shared snapshot. The shared-thread route lets the user pick a local project and import the snapshot into that project. See [shared.$shareId.tsx][27].
+
+#### Thread compaction
+
+A thread action that writes a continuation boundary so future turns can keep working with a smaller context footprint without abandoning the thread. See [threadArtifacts.ts][28] and [README.md][25].
+
+#### Continuation summary
+
+The persisted compacted summary CUT3 carries forward after thread compaction or share import. It preserves active goals, plan state, and other thread context for the next turn. See [threadArtifacts.ts][28] and [README.md][25].
+
+#### Thread undo/redo
+
+A linear restore flow backed by saved restore states. Undo moves the thread to an earlier snapshot and redo can reapply the trimmed future state while it remains available. See [threadRedoStore.ts][30] and [README.md][25].
+
 #### Task panel
 
 A compact read-only summary of provider-emitted task lifecycle events. It is derived from thread activities, stays separate from the curated work log, and only appears when a provider actually emits task events. See [session-logic.ts][26].
+
+### Composer and settings
+
+#### Permission policy
+
+A persistent approval rule stored in Settings and matched against pending provider approvals. Rules can be app-wide or project-scoped and can `allow`, `ask`, or `deny` based on request kind, raw request type, and detail text. See [PermissionPoliciesSection.tsx][31] and [runtime-modes.md][18].
 
 ### Orchestration
 
@@ -192,3 +223,10 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [24]: ./architecture.md
 [25]: ../README.md
 [26]: ../apps/web/src/session-logic.ts
+[27]: ../apps/web/src/routes/shared.$shareId.tsx
+[28]: ../apps/server/src/threadArtifacts.ts
+[29]: ../apps/server/src/threadShareStore.ts
+[30]: ../apps/server/src/threadRedoStore.ts
+[31]: ../apps/web/src/components/settings/PermissionPoliciesSection.tsx
+[32]: ../apps/server/src/projectWorkspaceMetadata.ts
+[33]: ../apps/web/src/components/chat/ComposerSkillPicker.tsx

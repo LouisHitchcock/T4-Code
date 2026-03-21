@@ -42,3 +42,11 @@ export const ApprovalRequestId = makeEntityId("ApprovalRequestId");
 export type ApprovalRequestId = typeof ApprovalRequestId.Type;
 export const CheckpointRef = makeEntityId("CheckpointRef");
 export type CheckpointRef = typeof CheckpointRef.Type;
+export const ThreadShareId = makeEntityId("ThreadShareId");
+export type ThreadShareId = typeof ThreadShareId.Type;
+
+export const ProjectSkillName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+);
+export type ProjectSkillName = typeof ProjectSkillName.Type;

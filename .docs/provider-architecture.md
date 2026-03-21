@@ -16,7 +16,8 @@ Current push channels include:
 Request bodies cover more than provider lifecycle calls. The WebSocket surface currently includes:
 
 - orchestration commands and diff/snapshot queries
-- project registry search/write operations, including workspace `AGENTS.md` discovery/drafting and `.cut3/commands/*.md` template discovery
+- project registry search/write operations, including workspace `AGENTS.md` discovery/drafting, `.cut3/commands/*.md` template discovery, and `.cut3/skills/<name>/SKILL.md` discovery
+- thread collaboration and history operations, including share create/get/revoke/import, compaction, undo, redo, and redo-status queries
 - shell/editor integration
 - git operations
 - terminal operations

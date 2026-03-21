@@ -107,7 +107,35 @@ describe("derivePendingApprovals", () => {
         requestId: "req-request-type",
         requestKind: "command",
         createdAt: "2026-02-23T00:00:01.000Z",
+        requestType: "command_execution_approval",
         detail: "pwd",
+      },
+    ]);
+  });
+
+  it("keeps unknown approval request types as generic pending approvals", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-open-unknown-request-type",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-unknown-request-type",
+          requestType: "subagent_launch_approval",
+          detail: "delegate search to helper",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-unknown-request-type",
+        requestKind: "other",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        requestType: "subagent_launch_approval",
+        detail: "delegate search to helper",
       },
     ]);
   });

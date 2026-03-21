@@ -1,10 +1,11 @@
 import { Schema } from "effect";
-import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
+import { PositiveInt, ProjectSkillName, TrimmedNonEmptyString } from "./baseSchemas";
 import { ProviderInteractionMode, ProviderKind, RuntimeMode } from "./orchestration";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_COMMAND_TEMPLATE_NAME_MAX_LENGTH = 128;
+const PROJECT_SKILL_DESCRIPTION_MAX_LENGTH = 1_024;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -98,3 +99,27 @@ export const ProjectListCommandTemplatesResult = Schema.Struct({
   issues: Schema.Array(ProjectCommandTemplateIssue),
 });
 export type ProjectListCommandTemplatesResult = typeof ProjectListCommandTemplatesResult.Type;
+
+export const ProjectSkill = Schema.Struct({
+  name: ProjectSkillName,
+  relativePath: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROJECT_SKILL_DESCRIPTION_MAX_LENGTH),
+  ),
+});
+export type ProjectSkill = typeof ProjectSkill.Type;
+
+export const ProjectSkillIssue = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  message: TrimmedNonEmptyString,
+});
+export type ProjectSkillIssue = typeof ProjectSkillIssue.Type;
+
+export const ProjectListSkillsInput = ProjectWorkspaceInput;
+export type ProjectListSkillsInput = typeof ProjectListSkillsInput.Type;
+
+export const ProjectListSkillsResult = Schema.Struct({
+  skills: Schema.Array(ProjectSkill),
+  issues: Schema.Array(ProjectSkillIssue),
+});
+export type ProjectListSkillsResult = typeof ProjectListSkillsResult.Type;

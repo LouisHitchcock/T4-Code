@@ -719,6 +719,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(persistedProviderOptions !== undefined
             ? { providerOptions: persistedProviderOptions }
             : {}),
+          ...(command.skills !== undefined ? { skills: command.skills } : {}),
           assistantDeliveryMode: command.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE,
           runtimeMode:
             readModel.threads.find((entry) => entry.id === command.threadId)?.runtimeMode ??
@@ -1088,6 +1089,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           activity: command.activity,
+        },
+      };
+    }
+
+    case "thread.restore": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.restored",
+        payload: {
+          threadId: command.threadId,
+          state: command.state,
         },
       };
     }

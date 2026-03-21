@@ -142,6 +142,26 @@ The composer now surfaces repo-owned workspace behavior directly:
 - Template bodies can interpolate `$ARGUMENTS` and `$1` through `$9`.
 - When `sendImmediately: true` is set, CUT3 expands the template and dispatches the turn directly. Otherwise it expands into the composer for review before sending.
 
+### Repo-local skills
+
+CUT3 also discovers repo-local skills from `.cut3/skills/<name>/SKILL.md`.
+
+- The directory name and frontmatter `name` must match and use the same lowercase hyphenated skill-name format.
+- `SKILL.md` frontmatter must include string `name` and `description` fields.
+- The composer Skills picker lists discovered skills, surfaces invalid skill files as issues, and lets you attach one or more skills to the next turn.
+- Applied skills are sent with the turn request and echoed back in the thread UI so the latest-turn banner can show which skills were used.
+
+### Permission policies
+
+Settings now includes a `Permission policies` section for durable approval rules.
+
+- Rules can be scoped to the whole app or the current project.
+- Each rule can `allow`, `ask`, or `deny`.
+- Matching can combine request-kind filters with raw request-type terms and free-text detail matching.
+- Rules are evaluated top to bottom, so ordering matters.
+- Build, Plan, and Review presets provide starter rules that can be cloned and reordered.
+- Runtime mode still sets the default sandbox and approval posture for a new session; permission policies only decide how individual pending approvals should be handled once a request exists.
+
 ### OpenCode MCP visibility
 
 CUT3 now inspects OpenCode MCP state through `opencode mcp list` and `opencode mcp auth list`, exposes those entries in `server.getConfig`, and shows the resolved OpenCode config sources in Settings. OpenCode still owns the actual OAuth flow and credential storage, so CUT3 only reports status and offers copyable CLI commands such as `opencode mcp auth <server>` and `opencode mcp debug <server>`.

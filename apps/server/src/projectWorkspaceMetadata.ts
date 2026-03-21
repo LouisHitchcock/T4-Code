@@ -11,11 +11,19 @@ import {
   type ProjectDraftAgentsFileResult,
   type ProjectListCommandTemplatesInput,
   type ProjectListCommandTemplatesResult,
+  type ProjectListSkillsInput,
+  type ProjectListSkillsResult,
+  type ProjectSkill,
+  ProjectSkill as ProjectSkillSchema,
+  type ProjectSkillIssue,
+  type ProjectSkillName,
 } from "@t3tools/contracts";
 import { Schema } from "effect";
 
 const AGENTS_FILE_NAME = "AGENTS.md";
 const COMMANDS_DIRECTORY_RELATIVE_PATH = ".cut3/commands";
+const SKILLS_DIRECTORY_RELATIVE_PATH = ".cut3/skills";
+const SKILL_FILE_NAME = "SKILL.md";
 const INIT_SECTION_START = "<!-- CUT3_INIT:START -->";
 const INIT_SECTION_END = "<!-- CUT3_INIT:END -->";
 
@@ -284,6 +292,68 @@ function parseCommandTemplate(
   }
 }
 
+interface ResolvedProjectSkill {
+  readonly skill: ProjectSkill;
+  readonly contents: string;
+}
+
+function parseProjectSkill(
+  skillDirectoryPath: string,
+  cwd: string,
+): {
+  skill: ResolvedProjectSkill | null;
+  issue: ProjectSkillIssue | null;
+} {
+  const skillFilePath = path.join(skillDirectoryPath, SKILL_FILE_NAME);
+  const relativePath = path.relative(cwd, skillFilePath).replaceAll(path.sep, "/");
+  const raw = safeReadTextFile(skillFilePath);
+  if (raw === null) {
+    return {
+      skill: null,
+      issue: {
+        relativePath,
+        message: "Failed to read skill file.",
+      },
+    };
+  }
+
+  try {
+    const { frontmatter, body } = parseFrontmatterSection(raw);
+    const parsedFrontmatter = parseFlatFrontmatter(frontmatter);
+    if (typeof parsedFrontmatter.name !== "string") {
+      throw new Error("Skill frontmatter must include a string 'name'.");
+    }
+    if (typeof parsedFrontmatter.description !== "string") {
+      throw new Error("Skill frontmatter must include a string 'description'.");
+    }
+    const directoryName = path.basename(skillDirectoryPath);
+    if (parsedFrontmatter.name !== directoryName) {
+      throw new Error("Skill frontmatter 'name' must match the directory name.");
+    }
+    const skill = Schema.decodeUnknownSync(ProjectSkillSchema)({
+      name: parsedFrontmatter.name,
+      relativePath,
+      description: parsedFrontmatter.description,
+    });
+    return {
+      skill: {
+        skill,
+        contents: body,
+      },
+      issue: null,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.trim() : String(error).trim();
+    return {
+      skill: null,
+      issue: {
+        relativePath,
+        message: detail.length > 0 ? detail : "Invalid skill.",
+      },
+    };
+  }
+}
+
 export function readProjectAgentsFile(input: ProjectAgentsFileInput): ProjectAgentsFileResult {
   const absolutePath = path.join(input.cwd, AGENTS_FILE_NAME);
   const exists = fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
@@ -341,4 +411,56 @@ export function listProjectCommandTemplates(
     }
   }
   return { commands, issues };
+}
+
+export function listProjectSkills(input: ProjectListSkillsInput): ProjectListSkillsResult {
+  const skillsDirectory = path.join(input.cwd, SKILLS_DIRECTORY_RELATIVE_PATH);
+  const skillDirectoryNames = safeReadDirectoryNames(skillsDirectory);
+  if (skillDirectoryNames.length === 0) {
+    return {
+      skills: [],
+      issues: [],
+    };
+  }
+
+  const skills: ProjectSkill[] = [];
+  const issues: ProjectSkillIssue[] = [];
+  for (const directoryName of skillDirectoryNames) {
+    const parsed = parseProjectSkill(path.join(skillsDirectory, directoryName), input.cwd);
+    if (parsed.skill) {
+      skills.push(parsed.skill.skill);
+    }
+    if (parsed.issue) {
+      issues.push(parsed.issue);
+    }
+  }
+
+  return { skills, issues };
+}
+
+export function resolveProjectSkillSelection(input: {
+  readonly cwd: string;
+  readonly skillNames: ReadonlyArray<ProjectSkillName>;
+}): ReadonlyArray<ResolvedProjectSkill> {
+  if (input.skillNames.length === 0) {
+    return [];
+  }
+
+  const resolvedSkills: ResolvedProjectSkill[] = [];
+  const seen = new Set<ProjectSkillName>();
+  for (const skillName of input.skillNames) {
+    if (seen.has(skillName)) {
+      continue;
+    }
+    seen.add(skillName);
+    const parsed = parseProjectSkill(
+      path.join(input.cwd, SKILLS_DIRECTORY_RELATIVE_PATH, skillName),
+      input.cwd,
+    );
+    if (parsed.skill) {
+      resolvedSkills.push(parsed.skill);
+    }
+  }
+
+  return resolvedSkills;
 }

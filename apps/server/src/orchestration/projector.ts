@@ -20,6 +20,7 @@ import {
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
+  ThreadRestoredPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
@@ -615,6 +616,42 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.restored":
+      return decodeForEvent(ThreadRestoredPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+
+          const checkpoints = [...payload.state.checkpoints]
+            .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
+            .slice(-MAX_THREAD_CHECKPOINTS);
+          const activities = [...payload.state.activities]
+            .toSorted(compareThreadActivities)
+            .slice(-500);
+
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              title: payload.state.title,
+              model: payload.state.model,
+              runtimeMode: payload.state.runtimeMode,
+              interactionMode: payload.state.interactionMode,
+              branch: payload.state.branch,
+              worktreePath: payload.state.worktreePath,
+              latestTurn: payload.state.latestTurn,
+              messages: payload.state.messages.slice(-MAX_THREAD_MESSAGES),
+              proposedPlans: payload.state.proposedPlans.slice(-200),
+              activities,
+              checkpoints,
+              session: payload.state.session,
               updatedAt: event.occurredAt,
             }),
           };

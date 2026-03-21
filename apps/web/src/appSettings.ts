@@ -18,6 +18,7 @@ import {
   normalizeAppearanceThemeConfig,
 } from "./lib/appearanceTheme";
 import { APP_LANGUAGE_OPTIONS, DEFAULT_APP_LANGUAGE, type AppLanguage } from "./appLanguage";
+import { normalizeApprovalRules } from "./approvalRules";
 import { CUSTOM_THEME_IDS } from "./lib/customThemes";
 import { isOpenRouterGuaranteedFreeSlug } from "./lib/openRouterModels";
 
@@ -69,6 +70,17 @@ const AppearanceThemeConfigSchema = Schema.Struct({
   codeFont: Schema.String.check(Schema.isMaxLength(256)),
   translucentSidebar: Schema.Boolean,
   contrast: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+});
+const ApprovalRuleSchema = Schema.Struct({
+  id: Schema.String.check(Schema.isMaxLength(128)),
+  label: Schema.String.check(Schema.isMaxLength(120)),
+  enabled: Schema.Boolean,
+  scope: Schema.Literals(["app", "project"]),
+  projectId: Schema.NullOr(Schema.String.check(Schema.isMaxLength(256))),
+  requestKinds: Schema.Array(Schema.Literals(["command", "file-read", "file-change", "other"])),
+  requestTypeTerms: Schema.String.check(Schema.isMaxLength(512)),
+  matchText: Schema.String.check(Schema.isMaxLength(512)),
+  action: Schema.Literals(["ask", "allow", "deny"]),
 });
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
@@ -170,6 +182,9 @@ const AppSettingsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => Option.some([])),
   ),
   hiddenKimiModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  approvalRules: Schema.Array(ApprovalRuleSchema).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
 });
@@ -307,6 +322,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     hiddenCopilotModels: normalizeModelVisibilitySlugs(settings.hiddenCopilotModels, "copilot"),
     hiddenOpencodeModels: normalizeModelVisibilitySlugs(settings.hiddenOpencodeModels, "opencode"),
     hiddenKimiModels: normalizeModelVisibilitySlugs(settings.hiddenKimiModels, "kimi"),
+    approvalRules: normalizeApprovalRules(settings.approvalRules),
   };
 }
 
