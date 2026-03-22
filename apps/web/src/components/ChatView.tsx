@@ -6930,7 +6930,7 @@ const ChatHeader = memo(function ChatHeader({
           disabled={!canUndoThread}
         >
           <RotateCcwIcon className="size-3.5" />
-          <span className="sr-only @lg/header-actions:not-sr-only">
+          <span className="sr-only @lg/header-actions:not-sr-only @lg/header-actions:ml-0.5">
             {isUndoingThread ? "Undoing..." : "Undo"}
           </span>
         </Button>
@@ -6943,7 +6943,7 @@ const ChatHeader = memo(function ChatHeader({
           disabled={!canRedoThread}
         >
           <RotateCwIcon className="size-3.5" />
-          <span className="sr-only @lg/header-actions:not-sr-only">
+          <span className="sr-only @lg/header-actions:not-sr-only @lg/header-actions:ml-0.5">
             {isRedoingThread ? "Redoing..." : "Redo"}
           </span>
         </Button>
