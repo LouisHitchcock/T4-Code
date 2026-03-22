@@ -37,6 +37,9 @@ type OpenCodeCliSectionEntry = {
 
 type ParsedOpenCodeMcpListEntry = {
   readonly name: string;
+  readonly enabled: boolean;
+  readonly state: ServerMcpServerStatus["state"];
+  readonly authStatus: ServerMcpServerAuthStatus;
   readonly connectionStatus: "connected" | "failed" | "unknown";
   readonly target?: string;
   readonly message?: string;
@@ -401,7 +404,9 @@ export function parseOpenCodeMcpListOutput(output: string): ParsedOpenCodeMcpLis
   const entries: ParsedOpenCodeMcpListEntry[] = [];
 
   for (const entry of parseOpenCodeCliSectionEntries(output)) {
-    const match = entry.header.match(/^●\s+[✓✗]\s+(.+?)\s+(connected|failed)$/i);
+    const match = entry.header.match(
+      /^●\s+[○✓⚠✗]\s+(.+?)\s+(connected|disabled|not initialized|needs authentication|needs client registration|failed)$/i,
+    );
     if (!match) {
       continue;
     }
@@ -412,17 +417,48 @@ export function parseOpenCodeMcpListOutput(output: string): ParsedOpenCodeMcpLis
       continue;
     }
 
-    const connectionStatus =
-      statusLabel === "connected" ? "connected" : statusLabel === "failed" ? "failed" : "unknown";
+    let enabled = true;
+    let state: ServerMcpServerStatus["state"] = "enabled";
+    let authStatus: ServerMcpServerAuthStatus = "unsupported";
+    let connectionStatus: ParsedOpenCodeMcpListEntry["connectionStatus"] = "unknown";
+    let fallbackMessage: string | undefined;
+    let preferSingleDetailAsTarget = true;
+
+    if (statusLabel === "connected") {
+      connectionStatus = "connected";
+    } else if (statusLabel === "failed") {
+      connectionStatus = "failed";
+      preferSingleDetailAsTarget = false;
+    } else if (statusLabel === "disabled" || statusLabel === "not initialized") {
+      enabled = false;
+      state = "disabled";
+      authStatus = "unknown";
+      fallbackMessage =
+        statusLabel === "not initialized" ? "Server not initialized yet." : undefined;
+    } else if (statusLabel === "needs authentication") {
+      authStatus = "not_logged_in";
+      fallbackMessage = "Needs authentication.";
+    } else if (statusLabel === "needs client registration") {
+      connectionStatus = "failed";
+      authStatus = "unknown";
+      preferSingleDetailAsTarget = false;
+      fallbackMessage = "Needs client registration.";
+    }
+
     const details = extractOpenCodeCliEntryDetails({
       details: entry.details,
       connectionStatus,
+      preferSingleDetailAsTarget,
     });
+    const resolvedMessage = details.message ?? fallbackMessage;
     entries.push({
       name,
+      enabled,
+      state,
+      authStatus,
       connectionStatus,
       ...(details.target ? { target: details.target } : {}),
-      ...(details.message ? { message: details.message } : {}),
+      ...(resolvedMessage ? { message: resolvedMessage } : {}),
     });
   }
 
@@ -469,9 +505,9 @@ export function mergeOpenCodeMcpServerStatuses(input: {
   for (const runtimeServer of input.runtimeServers) {
     merged.set(runtimeServer.name, {
       name: runtimeServer.name,
-      enabled: true,
-      state: "enabled",
-      authStatus: "unsupported",
+      enabled: runtimeServer.enabled,
+      state: runtimeServer.state,
+      authStatus: runtimeServer.authStatus,
       toolCount: 0,
       resourceCount: 0,
       resourceTemplateCount: 0,

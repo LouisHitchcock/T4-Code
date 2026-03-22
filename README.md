@@ -59,8 +59,8 @@ CUT3 now recognizes three repo-owned workspace surfaces:
 
 From the composer:
 
-- Run `/init` to create or update the workspace `AGENTS.md` through CUT3's guarded project write path.
-- Type `/` to see built-in commands plus any templates discovered from `.cut3/commands/*.md`.
+- Run built-in slash commands such as `/new` (`/clear`), `/compact` (`/summarize`), `/share`, `/unshare`, `/undo`, `/redo`, `/export`, `/details`, `/init`, `/plan`, `/default`, `/model`, and `/mcp` (when the active provider supports MCP).
+- Type `/` to see those built-in commands plus any templates discovered from `.cut3/commands/*.md`.
 - Open the Skills picker to attach repo-local skills discovered from `.cut3/skills/<name>/SKILL.md`. Skill files must include `name` and `description` frontmatter, and `name` must match the lowercase hyphenated directory name.
 - Template frontmatter can set `description`, optional `provider`, optional `model`, optional `interactionMode`, optional `runtimeMode`, and optional `sendImmediately`.
 
@@ -103,13 +103,15 @@ Open Settings in the app to configure provider-specific behavior on the current 
 
 - **Appearance**: choose the base light/dark/system mode, switch to integrated presets like Lilac, and configure a custom chat background image with adjustable fade and blur.
 - **Language**: switch the settings experience and shared app shell between English and Persian. Persian also flips document direction and locale-aware time/date formatting in the web UI.
-- **Provider overrides**: set custom binary paths for Codex, Copilot, OpenCode, or Kimi, plus an optional Codex home path, a shared OpenRouter API key, and a Kimi API key. OpenCode authentication still happens outside CUT3 through `opencode auth login`, `opencode auth logout`, and `opencode mcp auth`, but the OpenCode settings panel now inspects the resolved OpenCode config paths plus `opencode auth list`, `opencode mcp list`, and `opencode mcp auth list` so CUT3 can show current credentials, MCP status, and copyable recovery commands. Kimi CLI authentication can use either `kimi login` or the in-shell `/login` flow when you are not using an API key, and new OpenCode sessions now inherit that shared OpenRouter key as `OPENROUTER_API_KEY` when the OpenCode provider config expects it.
+- **Provider overrides**: set custom binary paths for Codex, Copilot, OpenCode, or Kimi, plus an optional Codex home path, a shared OpenRouter API key, and a Kimi API key. OpenCode account authentication still happens outside CUT3 through `opencode auth login` and `opencode auth logout`, while MCP server auth/debug remains server-specific through commands like `opencode mcp auth <server>` and `opencode mcp debug <server>`. The OpenCode settings panel inspects the resolved OpenCode config paths plus `opencode auth list`, `opencode mcp list`, and `opencode mcp auth list` so CUT3 can show current credentials, provider-specific MCP status (including disabled and auth-gated entries), and copyable recovery commands. Kimi CLI authentication can use either `kimi login` or the in-shell `/login` flow when you are not using an API key, and new OpenCode sessions now inherit that shared OpenRouter key as `OPENROUTER_API_KEY` when the OpenCode provider config expects it.
 - **OpenRouter free models**: review the current OpenRouter entries that are explicitly free-locked and compatible with CUT3's native tool-calling path (`tools` plus `tool_choice`), keep the built-in `openrouter/free` router handy, and pin any listed model into the picker.
 - **Custom model slugs**: save extra model ids for GitHub Copilot, OpenCode, Kimi, custom Codex models, or current OpenRouter `:free` slugs so they appear in the model picker and `/model` suggestions.
 - **Picker controls**: the chat composer now uses a searchable grouped model picker with direct `Connect provider` and `Manage models` actions.
 - **Model visibility**: hide or restore discovered and saved models without deleting them; hidden models are removed from both the picker and `/model` suggestions until you show them again.
+- **Thread defaults**: choose whether new draft threads start in `Local` or `New worktree`, and set thread sharing to `Manual`, `Auto` (create a share link after a new server-backed thread settles), or `Disabled` for new links.
 - **Codex service tier**: choose `Automatic`, `Fast`, or `Flex` as the default service tier for new Codex turns.
 - **Per-turn controls**: the composer exposes provider-aware reasoning controls, and Codex also supports a per-turn `Fast Mode` toggle.
+- **Response visibility**: choose whether assistant messages stream token-by-token and whether tool/work-log entries stay visible in the main timeline.
 - **Permission policies**: save persistent app-wide or project-scoped approval rules with `allow`, `ask`, or `deny` actions, request-kind filters, request-type/detail matching, and Build/Plan/Review presets.
 
 The chat model picker now shows OpenRouter as its own top-level section, with the built-in `openrouter/free` router plus the current OpenRouter `:free` models that CUT3 can safely use for native tool-calling turns. The picker is searchable, grouped by provider, and can open in-chat provider setup and model-management surfaces without sending you into Settings first.
@@ -127,7 +129,7 @@ Runtime mode sets the default sandbox and approval posture for new sessions. Per
 
 When a plan is active, CUT3 can keep it open in a sidebar and export it by copying, downloading markdown, or saving it into the workspace.
 
-Threads also expose collaboration and history controls directly in the chat surface. Use the thread actions menu to share the current thread as a read-only snapshot, revoke an active share, compact the thread into a continuation summary, fork the current thread, or export the full thread as markdown or JSON. Shared snapshots open in a dedicated read-only route that can import the snapshot into another local project. Use `Undo` and `Redo` in the thread header to move through recent restore snapshots, use `Fork thread here` on individual messages to branch from that point, and use the diff panel to fork from a completed checkpoint. When a provider emits task lifecycle events, CUT3 shows a compact task panel above the timeline.
+Threads also expose collaboration and history controls directly in the chat surface. Use the thread actions menu or the composer slash commands (`/share`, `/unshare`, `/compact`, `/undo`, `/redo`, `/export`, `/details`) to manage the current thread. Shared snapshots open in a dedicated read-only route that can import the snapshot into another local project. Use `Undo` and `Redo` in the thread header to move through recent restore snapshots, use `Fork thread here` on individual messages to branch from that point, and use the diff panel to fork from a completed checkpoint. When a provider emits task lifecycle events, CUT3 shows a compact task panel above the timeline.
 
 For the full details, see [.docs/runtime-modes.md](.docs/runtime-modes.md).
 

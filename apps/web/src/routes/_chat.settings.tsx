@@ -13,6 +13,7 @@ import {
   MAX_CHAT_BACKGROUND_IMAGE_BYTES,
   MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH,
   MAX_CUSTOM_MODEL_LENGTH,
+  THREAD_SHARE_MODE_OPTIONS,
   useAppSettings,
 } from "../appSettings";
 import { getAppLanguageDetails, type AppLanguage } from "../appLanguage";
@@ -217,12 +218,23 @@ function getSettingsCopy(language: AppLanguage) {
       defaultToNewWorktree: "پیش فرض روی New worktree",
       defaultToNewWorktreeDescription:
         "رشته های جدید به جای Local در حالت New worktree شروع می شوند.",
+      threadShareMode: "حالت اشتراک رشته",
+      threadShareModeDescription:
+        "مشخص کنید لینک های اشتراک به صورت دستی ساخته شوند، بعد از آرام شدن رشته جدید به طور خودکار ساخته شوند، یا ساخت لینک جدید کاملا غیرفعال شود.",
+      threadShareModeOptions: {
+        manual: "دستی",
+        auto: "خودکار",
+        disabled: "غیرفعال",
+      },
       restoreDefault: "بازگردانی پیش فرض",
       responsesTitle: "پاسخ ها",
       responsesDescription: "مشخص کنید خروجی دستیار هنگام اجرا چگونه نمایش داده شود.",
       streamAssistantMessages: "پخش زنده پیام های دستیار",
       streamAssistantMessagesDescription:
         "وقتی پاسخ در حال تولید است، خروجی را به صورت توکن به توکن نشان می دهد.",
+      showToolDetails: "نمایش جزئیات ابزارها",
+      showToolDetailsDescription:
+        "ورودی های work log را در خط زمانی گفتگو نشان دهید یا پنهان کنید. پنل task ها و درخواست های تایید همچنان جداگانه دیده می شوند.",
       keybindingsTitle: "کلیدهای میانبر",
       keybindingsDescription:
         "برای ویرایش مستقیم میانبرهای پیشرفته، فایل keybindings.json ذخیره شده را باز کنید.",
@@ -390,12 +402,23 @@ function getSettingsCopy(language: AppLanguage) {
     threadsDescription: "Choose the default workspace mode for newly created draft threads.",
     defaultToNewWorktree: "Default to New worktree",
     defaultToNewWorktreeDescription: "New threads start in New worktree mode instead of Local.",
+    threadShareMode: "Thread sharing mode",
+    threadShareModeDescription:
+      "Choose whether new share links are created manually, auto-created after a new thread settles, or blocked entirely.",
+    threadShareModeOptions: {
+      manual: "Manual",
+      auto: "Auto",
+      disabled: "Disabled",
+    },
     restoreDefault: "Restore default",
     responsesTitle: "Responses",
     responsesDescription: "Control how assistant output is rendered during a turn.",
     streamAssistantMessages: "Stream assistant messages",
     streamAssistantMessagesDescription:
       "Show token-by-token output while a response is in progress.",
+    showToolDetails: "Show tool details",
+    showToolDetailsDescription:
+      "Show or hide work-log entries in the main timeline. The task panel and approval prompts stay visible separately.",
     keybindingsTitle: "Keybindings",
     keybindingsDescription:
       "Open the persisted keybindings.json file to edit advanced bindings directly.",
@@ -1672,25 +1695,58 @@ function SettingsRouteView() {
                 <p className="mt-1 text-xs text-muted-foreground">{copy.threadsDescription}</p>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{copy.defaultToNewWorktree}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {copy.defaultToNewWorktreeDescription}
-                  </p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      {copy.defaultToNewWorktree}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {copy.defaultToNewWorktreeDescription}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.defaultThreadEnvMode === "worktree"}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        defaultThreadEnvMode: checked ? "worktree" : "local",
+                      })
+                    }
+                    aria-label={copy.defaultToNewWorktree}
+                  />
                 </div>
-                <Switch
-                  checked={settings.defaultThreadEnvMode === "worktree"}
-                  onCheckedChange={(checked) =>
-                    updateSettings({
-                      defaultThreadEnvMode: checked ? "worktree" : "local",
-                    })
-                  }
-                  aria-label={copy.defaultToNewWorktree}
-                />
+
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">{copy.threadShareMode}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {copy.threadShareModeDescription}
+                    </p>
+                  </div>
+                  <Select
+                    value={settings.threadShareMode}
+                    onValueChange={(value) =>
+                      updateSettings({
+                        threadShareMode: value as (typeof THREAD_SHARE_MODE_OPTIONS)[number],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-36" aria-label={copy.threadShareMode}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="manual">{copy.threadShareModeOptions.manual}</SelectItem>
+                      <SelectItem value="auto">{copy.threadShareModeOptions.auto}</SelectItem>
+                      <SelectItem value="disabled">
+                        {copy.threadShareModeOptions.disabled}
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>
               </div>
 
-              {settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? (
+              {settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ||
+              settings.threadShareMode !== defaults.threadShareMode ? (
                 <div className="mt-3 flex justify-end">
                   <Button
                     size="xs"
@@ -1698,6 +1754,7 @@ function SettingsRouteView() {
                     onClick={() =>
                       updateSettings({
                         defaultThreadEnvMode: defaults.defaultThreadEnvMode,
+                        threadShareMode: defaults.threadShareMode,
                       })
                     }
                   >
@@ -1713,27 +1770,48 @@ function SettingsRouteView() {
                 <p className="mt-1 text-xs text-muted-foreground">{copy.responsesDescription}</p>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {copy.streamAssistantMessages}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {copy.streamAssistantMessagesDescription}
-                  </p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      {copy.streamAssistantMessages}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {copy.streamAssistantMessagesDescription}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.enableAssistantStreaming}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        enableAssistantStreaming: Boolean(checked),
+                      })
+                    }
+                    aria-label={copy.streamAssistantMessages}
+                  />
                 </div>
-                <Switch
-                  checked={settings.enableAssistantStreaming}
-                  onCheckedChange={(checked) =>
-                    updateSettings({
-                      enableAssistantStreaming: Boolean(checked),
-                    })
-                  }
-                  aria-label={copy.streamAssistantMessages}
-                />
+
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{copy.showToolDetails}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {copy.showToolDetailsDescription}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.showToolDetails}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        showToolDetails: Boolean(checked),
+                      })
+                    }
+                    aria-label={copy.showToolDetails}
+                  />
+                </div>
               </div>
 
-              {settings.enableAssistantStreaming !== defaults.enableAssistantStreaming ? (
+              {settings.enableAssistantStreaming !== defaults.enableAssistantStreaming ||
+              settings.showToolDetails !== defaults.showToolDetails ? (
                 <div className="mt-3 flex justify-end">
                   <Button
                     size="xs"
@@ -1741,6 +1819,7 @@ function SettingsRouteView() {
                     onClick={() =>
                       updateSettings({
                         enableAssistantStreaming: defaults.enableAssistantStreaming,
+                        showToolDetails: defaults.showToolDetails,
                       })
                     }
                   >

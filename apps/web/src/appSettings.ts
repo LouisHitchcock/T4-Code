@@ -35,6 +35,8 @@ export const TIMESTAMP_FORMAT_OPTIONS = ["locale", "12-hour", "24-hour"] as cons
 export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 export const DEFAULT_APP_LANGUAGE_SETTING: AppLanguage = DEFAULT_APP_LANGUAGE;
+export const THREAD_SHARE_MODE_OPTIONS = ["manual", "auto", "disabled"] as const;
+export type ThreadShareMode = (typeof THREAD_SHARE_MODE_OPTIONS)[number];
 export const APP_SERVICE_TIER_OPTIONS = [
   {
     value: "auto",
@@ -54,6 +56,7 @@ export const APP_SERVICE_TIER_OPTIONS = [
 ] as const;
 export type AppServiceTier = (typeof APP_SERVICE_TIER_OPTIONS)[number]["value"];
 const AppServiceTierSchema = Schema.Literals(["auto", "fast", "flex"]);
+const ThreadShareModeSchema = Schema.Literals(THREAD_SHARE_MODE_OPTIONS);
 const CustomThemeIdSchema = Schema.Literals(CUSTOM_THEME_IDS);
 const MODELS_WITH_FAST_SUPPORT = new Set(["gpt-5.4"]);
 const PROVIDERS_WITH_CUSTOM_MODEL_SUPPORT = new Set<ProviderKind>([
@@ -147,10 +150,14 @@ const AppSettingsSchema = Schema.Struct({
   defaultThreadEnvMode: Schema.Literals(["local", "worktree"]).pipe(
     Schema.withConstructorDefault(() => Option.some("local")),
   ),
+  threadShareMode: ThreadShareModeSchema.pipe(
+    Schema.withConstructorDefault(() => Option.some("manual")),
+  ),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
+  showToolDetails: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   codexServiceTier: AppServiceTierSchema.pipe(
     Schema.withConstructorDefault(() => Option.some("auto")),
   ),
@@ -314,6 +321,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     darkAppearanceTheme: normalizeAppearanceThemeConfig(settings.darkAppearanceTheme, "dark"),
     uiFontSizePx: clampUiFontSizePx(settings.uiFontSizePx),
     usePointerCursors: Boolean(settings.usePointerCursors),
+    showToolDetails: Boolean(settings.showToolDetails),
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
     customCopilotModels: normalizeCustomModelSlugs(settings.customCopilotModels, "copilot"),
     customOpencodeModels: normalizeCustomModelSlugs(settings.customOpencodeModels, "opencode"),

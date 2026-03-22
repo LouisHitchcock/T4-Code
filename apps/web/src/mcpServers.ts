@@ -71,9 +71,22 @@ function formatCapabilities(server: ServerMcpServerStatus): string | null {
   return null;
 }
 
-export function formatMcpServerDescription(server: ServerMcpServerStatus): string {
-  if (!server.enabled) {
+function disabledMcpDescription(provider: ProviderKind | undefined): string {
+  if (provider === "codex") {
     return "Disabled in Codex config";
+  }
+  if (provider === "opencode") {
+    return "Disabled in OpenCode config";
+  }
+  return "Disabled";
+}
+
+export function formatMcpServerDescription(
+  server: ServerMcpServerStatus,
+  provider?: ProviderKind,
+): string {
+  if (!server.enabled) {
+    return disabledMcpDescription(provider);
   }
 
   const parts = ["Enabled"];
@@ -125,6 +138,6 @@ export function buildComposerMcpServerItems(input: {
       provider: input.provider,
       state: server.state,
       authStatus: server.authStatus,
-      description: formatMcpServerDescription(server),
+      description: formatMcpServerDescription(server, input.provider),
     }));
 }

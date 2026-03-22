@@ -112,6 +112,7 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  getComposerSlashCommandAliases,
   parseStandaloneComposerSlashInvocation,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
@@ -170,6 +171,7 @@ import { basenameOfPath, getVscodeIconUrlForEntry } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useChatBackgroundImage } from "../hooks/useChatBackgroundImage";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useNewThreadActions } from "../hooks/useNewThread";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
 import {
@@ -293,6 +295,11 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import {
+  canCreateThreadShareLink,
+  canOpenThreadShareDialog,
+  shouldAutoCreateThreadShare,
+} from "~/lib/threadShareMode";
 import { LastInvokedScriptByProjectSchema } from "./ChatView.logic";
 import {
   expandProjectCommandTemplate,
@@ -584,6 +591,7 @@ type ComposerCommandItem =
       command: ComposerSlashCommand;
       label: string;
       description: string;
+      aliases?: ReadonlyArray<string>;
     }
   | {
       id: string;
@@ -837,6 +845,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const chatCopy = useMemo(() => getChatSurfaceCopy(settings.language), [settings.language]);
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
+  const { defaultProjectId, openDefaultNewThread } = useNewThreadActions();
   const rawSearch = useSearch({
     strict: false,
     select: (params) => parseDiffRouteSearch(params),
@@ -919,6 +928,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isForkingThread, setIsForkingThread] = useState(false);
   const [isThreadShareDialogOpen, setIsThreadShareDialogOpen] = useState(false);
+  const autoShareAttemptedThreadIdsRef = useRef<Set<ThreadId>>(new Set());
   const [isThreadExportDialogOpen, setIsThreadExportDialogOpen] = useState(false);
   const [threadExportFormat, setThreadExportFormat] = useState<ThreadExportFormat>("markdown");
   const [threadExportPath, setThreadExportPath] = useState("");
@@ -2026,10 +2036,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  const visibleWorkLogEntries = useMemo(
+    () => (settings.showToolDetails ? workLogEntries : []),
+    [settings.showToolDetails, workLogEntries],
+  );
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        visibleWorkLogEntries,
+      ),
+    [activeThread?.proposedPlans, timelineMessages, visibleWorkLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -2345,10 +2363,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       })),
     [latestSkillsActivity?.skills, projectSkillsByName],
   );
-  const canShareThread =
+  const baseShareAvailable =
     isServerThread && phase !== "running" && !isSendBusy && !isConnecting && !isRevertingCheckpoint;
+  const canCreateShareThread = canCreateThreadShareLink({
+    shareMode: settings.threadShareMode,
+    baseShareAvailable,
+    hasActiveShare: activeShare !== null,
+  });
+  const canShareThread = canOpenThreadShareDialog({
+    shareMode: settings.threadShareMode,
+    baseShareAvailable,
+    hasActiveShare: activeShare !== null,
+  });
   const canCompactThread =
-    canShareThread && !compactThreadMutation.isPending && (activeThread?.messages.length ?? 0) > 0;
+    baseShareAvailable &&
+    !compactThreadMutation.isPending &&
+    (activeThread?.messages.length ?? 0) > 0;
   const canUndoThread =
     isServerThread &&
     (activeThread?.messages.length ?? 0) > 0 &&
@@ -2415,6 +2445,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           command: "model",
           label: "/model",
           description: "Switch response model for this thread",
+          aliases: getComposerSlashCommandAliases("model"),
         },
         {
           id: "slash:plan",
@@ -2422,6 +2453,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           command: "plan",
           label: "/plan",
           description: "Switch this thread into plan mode",
+          aliases: getComposerSlashCommandAliases("plan"),
         },
         {
           id: "slash:default",
@@ -2429,6 +2461,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           command: "default",
           label: "/default",
           description: "Switch this thread back to normal chat mode",
+          aliases: getComposerSlashCommandAliases("default"),
         },
         {
           id: "slash:init",
@@ -2439,15 +2472,91 @@ export default function ChatView({ threadId }: ChatViewProps) {
             agentsFileQuery.data?.status === "available"
               ? "Update the workspace AGENTS.md file"
               : "Create the workspace AGENTS.md file",
+          aliases: getComposerSlashCommandAliases("init"),
+        },
+        {
+          id: "slash:new",
+          type: "slash-command",
+          command: "new",
+          label: "/new",
+          description: "Start a new draft thread",
+          aliases: getComposerSlashCommandAliases("new"),
+        },
+        {
+          id: "slash:compact",
+          type: "slash-command",
+          command: "compact",
+          label: "/compact",
+          description: "Compact this thread into a continuation summary",
+          aliases: getComposerSlashCommandAliases("compact"),
+        },
+        {
+          id: "slash:share",
+          type: "slash-command",
+          command: "share",
+          label: "/share",
+          description: activeShareUrl
+            ? "Copy the current share link"
+            : settings.threadShareMode === "disabled"
+              ? "Sharing is disabled in Settings"
+              : "Create a read-only share link for this thread",
+          aliases: getComposerSlashCommandAliases("share"),
+        },
+        {
+          id: "slash:unshare",
+          type: "slash-command",
+          command: "unshare",
+          label: "/unshare",
+          description: activeShare ? "Revoke the current share link" : "No active share link",
+          aliases: getComposerSlashCommandAliases("unshare"),
+        },
+        {
+          id: "slash:undo",
+          type: "slash-command",
+          command: "undo",
+          label: "/undo",
+          description: canUndoThread ? "Undo the latest completed turn" : "Nothing to undo yet",
+          aliases: getComposerSlashCommandAliases("undo"),
+        },
+        {
+          id: "slash:redo",
+          type: "slash-command",
+          command: "redo",
+          label: "/redo",
+          description: canRedoThread
+            ? "Restore the latest undone turn"
+            : "No redo snapshot available",
+          aliases: getComposerSlashCommandAliases("redo"),
+        },
+        {
+          id: "slash:export",
+          type: "slash-command",
+          command: "export",
+          label: "/export",
+          description: isServerThread
+            ? "Export this thread as markdown or JSON"
+            : "Send at least one turn before exporting",
+          aliases: getComposerSlashCommandAliases("export"),
+        },
+        {
+          id: "slash:details",
+          type: "slash-command",
+          command: "details",
+          label: "/details",
+          description: settings.showToolDetails
+            ? "Hide tool details in the timeline"
+            : "Show tool details in the timeline",
+          aliases: getComposerSlashCommandAliases("details"),
         },
       ];
       if (composerMcpSupported) {
-        slashCommandItems.splice(2, 0, {
+        slashCommandItems.splice(1, 0, {
           id: "slash:mcp",
           type: "slash-command",
           command: "mcp",
           label: "/mcp",
           description: "Show MCP servers for the active provider",
+          aliases: getComposerSlashCommandAliases("mcp"),
         });
       }
       const templateItems: Array<Extract<ComposerCommandItem, { type: "template" }>> =
@@ -2465,7 +2574,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       return [...slashCommandItems, ...templateItems].filter((item) => {
         if (item.type === "slash-command") {
-          return item.command.includes(query) || item.label.slice(1).includes(query);
+          return (
+            item.command.includes(query) ||
+            item.label.slice(1).includes(query) ||
+            item.aliases?.some((alias) => alias.includes(query)) === true
+          );
         }
         return (
           item.template.name.toLowerCase().includes(query) ||
@@ -2510,14 +2623,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
           provider === "codex" && shouldShowFastTierIcon(slug, selectedServiceTierSetting),
       }));
   }, [
+    activeShare,
+    activeShareUrl,
+    canRedoThread,
+    canUndoThread,
     composerMcpSupported,
     composerMcpProvider,
     composerTrigger,
     agentsFileQuery.data?.status,
+    isServerThread,
     projectCommandTemplates,
     providerMcpStatuses,
     searchableModelOptions,
     selectedServiceTierSetting,
+    settings.showToolDetails,
+    settings.threadShareMode,
     workspaceEntries,
   ]);
   const composerMenuOpen = Boolean(composerTrigger);
@@ -3831,6 +3951,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeShare, navigate]);
 
   const createThreadShare = useCallback(async () => {
+    if (!canCreateShareThread) {
+      toastManager.add({
+        type: "warning",
+        title:
+          settings.threadShareMode === "disabled"
+            ? "Sharing is disabled"
+            : "This thread can't be shared right now",
+        description:
+          settings.threadShareMode === "disabled"
+            ? "Change the thread sharing mode in Settings to create new share links."
+            : "Wait for the current turn to settle, then try again.",
+      });
+      return null;
+    }
+
     try {
       const result = await createThreadShareMutation.mutateAsync();
       setIsThreadShareDialogOpen(true);
@@ -3839,17 +3974,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
         title: "Share link created",
         description: result.share.title,
       });
+      return result;
     } catch (error) {
       toastManager.add({
         type: "error",
         title: "Could not create share link",
         description: error instanceof Error ? error.message : "An unexpected error occurred.",
       });
+      return null;
     }
-  }, [createThreadShareMutation]);
+  }, [canCreateShareThread, createThreadShareMutation, settings.threadShareMode]);
 
   const revokeThreadShare = useCallback(async () => {
     if (!activeShare) {
+      toastManager.add({
+        type: "warning",
+        title: "No active share link",
+        description: "This thread does not currently have a share link to revoke.",
+      });
       return;
     }
     try {
@@ -3866,6 +4008,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
       });
     }
   }, [activeShare, revokeThreadShareMutation]);
+
+  useEffect(() => {
+    if (!threadShareStatusQuery.isFetched) {
+      return;
+    }
+    if (
+      !shouldAutoCreateThreadShare({
+        shareMode: settings.threadShareMode,
+        threadId: activeServerThreadId,
+        baseShareAvailable,
+        hasActiveShare: activeShare !== null,
+        attemptedThreadIds: autoShareAttemptedThreadIdsRef.current,
+      })
+    ) {
+      return;
+    }
+
+    const threadIdForAttempt = activeServerThreadId;
+    if (!threadIdForAttempt) {
+      return;
+    }
+    autoShareAttemptedThreadIdsRef.current.add(threadIdForAttempt);
+    void createThreadShareMutation.mutateAsync().catch((error) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not auto-share thread",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    });
+  }, [
+    activeServerThreadId,
+    activeShare,
+    baseShareAvailable,
+    createThreadShareMutation,
+    settings.threadShareMode,
+    threadShareStatusQuery.isFetched,
+  ]);
 
   const compactThread = useCallback(async () => {
     const api = readNativeApi();
@@ -3951,6 +4130,120 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
   }, [activeThread, canRedoThread, redoThreadMutation]);
 
+  const runStandaloneSlashCommand = useCallback(
+    async (command: Exclude<ComposerSlashCommand, "model" | "mcp">) => {
+      if (command === "init") {
+        await runInitCommand();
+        return;
+      }
+      if (command === "plan" || command === "default") {
+        await handleInteractionModeChange(command);
+        return;
+      }
+      if (command === "new") {
+        if (!defaultProjectId) {
+          toastManager.add({
+            type: "warning",
+            title: "No project available",
+            description: "Add or select a project before starting a new thread.",
+          });
+          return;
+        }
+        await openDefaultNewThread();
+        return;
+      }
+      if (command === "compact") {
+        if (!canCompactThread) {
+          toastManager.add({
+            type: "warning",
+            title: "This thread can't be compacted right now",
+            description: "Wait for the current turn to settle, then try again.",
+          });
+          return;
+        }
+        await compactThread();
+        return;
+      }
+      if (command === "share") {
+        if (activeShareUrl) {
+          await copyThreadShareLink();
+          return;
+        }
+        await createThreadShare();
+        return;
+      }
+      if (command === "unshare") {
+        await revokeThreadShare();
+        return;
+      }
+      if (command === "undo") {
+        if (!canUndoThread) {
+          toastManager.add({
+            type: "warning",
+            title: "This thread can't be undone right now",
+            description: "Wait for the current turn to settle, then try again.",
+          });
+          return;
+        }
+        await undoThread();
+        return;
+      }
+      if (command === "redo") {
+        if (!canRedoThread) {
+          toastManager.add({
+            type: "warning",
+            title: "Nothing to redo",
+            description: "Undo a turn first to create a redo snapshot.",
+          });
+          return;
+        }
+        await redoThread();
+        return;
+      }
+      if (command === "export") {
+        if (!isServerThread) {
+          toastManager.add({
+            type: "warning",
+            title: "Thread export is unavailable",
+            description: "Send at least one turn before exporting this thread.",
+          });
+          return;
+        }
+        openThreadExportDialog();
+        return;
+      }
+      if (command === "details") {
+        const nextShowToolDetails = !settings.showToolDetails;
+        updateSettings({ showToolDetails: nextShowToolDetails });
+        toastManager.add({
+          type: "success",
+          title: nextShowToolDetails ? "Tool details shown" : "Tool details hidden",
+        });
+        return;
+      }
+    },
+    [
+      activeShareUrl,
+      canCompactThread,
+      canRedoThread,
+      canUndoThread,
+      compactThread,
+      copyThreadShareLink,
+      createThreadShare,
+      defaultProjectId,
+      handleInteractionModeChange,
+      isServerThread,
+      openDefaultNewThread,
+      openThreadExportDialog,
+      redoThread,
+      revokeThreadShare,
+      runInitCommand,
+      settings.showToolDetails,
+      undoThread,
+      updateSettings,
+    ],
+  );
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
@@ -3987,11 +4280,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const standaloneSlashCommand =
       composerImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
     if (standaloneSlashCommand) {
-      if (standaloneSlashCommand === "init") {
-        await runInitCommand();
-      } else {
-        await handleInteractionModeChange(standaloneSlashCommand);
-      }
+      await runStandaloneSlashCommand(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(activeThread.id);
       setPendingTemplateOverrides(null);
@@ -5174,8 +5463,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        const nextMode = item.command === "plan" ? "plan" : "default";
-        void handleInteractionModeChange(nextMode);
+        void runStandaloneSlashCommand(item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -5215,9 +5503,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
-      handleInteractionModeChange,
       onProviderModelSelect,
       resolveActiveComposerTrigger,
+      runStandaloneSlashCommand,
     ],
   );
   const onComposerMenuItemHighlighted = useCallback((itemId: string | null) => {

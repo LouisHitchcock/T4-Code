@@ -30,3 +30,13 @@ The thread surface also exposes history and collaboration controls that build on
 - **Compact thread**: write a continuation-summary boundary so the thread can keep going with a smaller context footprint.
 - **Undo / Redo**: move through recent restore snapshots without manually selecting checkpoints.
 - **Fork / Export**: keep the existing fork and export controls from the thread actions menu, message actions, and diff panel.
+
+These controls are also reachable from the composer with built-in slash commands such as `/share`, `/unshare`, `/compact`, `/undo`, `/redo`, `/export`, and `/details`.
+
+## Sharing modes
+
+Settings also controls how new share links behave:
+
+- **Manual**: create share links only when you explicitly choose `/share` or the thread action.
+- **Auto**: create a share link automatically after a new server-backed thread settles for the first time.
+- **Disabled**: block creation of new share links from CUT3 until you change the setting again.

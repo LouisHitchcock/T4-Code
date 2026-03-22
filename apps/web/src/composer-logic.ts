@@ -1,7 +1,20 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "slash-mcp";
-export type ComposerSlashCommand = "model" | "mcp" | "plan" | "default" | "init";
+export type ComposerSlashCommand =
+  | "model"
+  | "mcp"
+  | "plan"
+  | "default"
+  | "init"
+  | "new"
+  | "compact"
+  | "share"
+  | "unshare"
+  | "undo"
+  | "redo"
+  | "export"
+  | "details";
 
 export interface ComposerSlashInvocation {
   command: string;
@@ -13,6 +26,43 @@ export interface ComposerTrigger {
   query: string;
   rangeStart: number;
   rangeEnd: number;
+}
+
+const COMPOSER_SLASH_COMMAND_ALIASES: Record<ComposerSlashCommand, ReadonlyArray<string>> = {
+  model: [],
+  mcp: [],
+  plan: [],
+  default: [],
+  init: [],
+  new: ["clear"],
+  compact: ["summarize"],
+  share: [],
+  unshare: [],
+  undo: [],
+  redo: [],
+  export: [],
+  details: [],
+};
+
+export function getComposerSlashCommandAliases(
+  command: ComposerSlashCommand,
+): ReadonlyArray<string> {
+  return COMPOSER_SLASH_COMMAND_ALIASES[command];
+}
+
+export function normalizeBuiltInComposerSlashCommand(value: string): ComposerSlashCommand | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  for (const command of Object.keys(COMPOSER_SLASH_COMMAND_ALIASES) as ComposerSlashCommand[]) {
+    if (command === normalized || COMPOSER_SLASH_COMMAND_ALIASES[command].includes(normalized)) {
+      return command;
+    }
+  }
+
+  return null;
 }
 
 function clampCursor(text: string, cursor: number): number {
@@ -225,14 +275,15 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 export function parseStandaloneComposerSlashCommand(
   text: string,
 ): Exclude<ComposerSlashCommand, "model" | "mcp"> | null {
-  const match = /^\/(plan|default|init)\s*$/i.exec(text.trim());
+  const match = /^\/([a-z0-9][a-z0-9_-]*)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
-  const command = match[1]?.toLowerCase();
-  if (command === "plan") return "plan";
-  if (command === "init") return "init";
-  return "default";
+  const normalized = normalizeBuiltInComposerSlashCommand(match[1] ?? "");
+  if (normalized === null || normalized === "model" || normalized === "mcp") {
+    return null;
+  }
+  return normalized;
 }
 
 export function parseStandaloneComposerSlashInvocation(
@@ -243,7 +294,7 @@ export function parseStandaloneComposerSlashInvocation(
     return null;
   }
   const command = match[1]?.trim().toLowerCase();
-  if (!command || command === "model" || command === "mcp") {
+  if (!command || normalizeBuiltInComposerSlashCommand(command) !== null) {
     return null;
   }
   return {

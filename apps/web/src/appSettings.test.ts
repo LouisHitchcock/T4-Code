@@ -246,6 +246,17 @@ describe("sanitizePersistedAppSettingsForStorage", () => {
     expect(sanitized.chatBackgroundImageBlurPx).toBe(8);
   });
 
+  it("preserves thread sharing and tool-detail preferences", () => {
+    const sanitized = sanitizePersistedAppSettingsForStorage({
+      ...getAppSettingsSnapshot(),
+      threadShareMode: "auto",
+      showToolDetails: false,
+    });
+
+    expect(sanitized.threadShareMode).toBe("auto");
+    expect(sanitized.showToolDetails).toBe(false);
+  });
+
   it("returns a stable snapshot reference when storage has not changed", () => {
     const localStorage = {
       getItem: () => null,

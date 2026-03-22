@@ -280,7 +280,7 @@ export const OpenCodeCredentialsManager = memo(function OpenCodeCredentialsManag
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium text-foreground">{server.name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {formatMcpServerDescription(server)}
+                          {formatMcpServerDescription(server, "opencode")}
                         </span>
                       </div>
                       {server.target ? (

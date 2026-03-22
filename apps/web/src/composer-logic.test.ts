@@ -251,6 +251,22 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand("/init")).toBe("init");
   });
 
+  it("parses OpenCode-inspired session actions", () => {
+    expect(parseStandaloneComposerSlashCommand("/new")).toBe("new");
+    expect(parseStandaloneComposerSlashCommand("/compact")).toBe("compact");
+    expect(parseStandaloneComposerSlashCommand("/share")).toBe("share");
+    expect(parseStandaloneComposerSlashCommand("/unshare")).toBe("unshare");
+    expect(parseStandaloneComposerSlashCommand("/undo")).toBe("undo");
+    expect(parseStandaloneComposerSlashCommand("/redo")).toBe("redo");
+    expect(parseStandaloneComposerSlashCommand("/export")).toBe("export");
+    expect(parseStandaloneComposerSlashCommand("/details")).toBe("details");
+  });
+
+  it("parses built-in aliases", () => {
+    expect(parseStandaloneComposerSlashCommand("/clear")).toBe("new");
+    expect(parseStandaloneComposerSlashCommand("/summarize")).toBe("compact");
+  });
+
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
   });
@@ -264,8 +280,10 @@ describe("parseStandaloneComposerSlashInvocation", () => {
     });
   });
 
-  it("ignores /model and /mcp control commands", () => {
+  it("ignores built-in control and action commands", () => {
     expect(parseStandaloneComposerSlashInvocation("/model gpt-5")).toBeNull();
     expect(parseStandaloneComposerSlashInvocation("/mcp filesystem")).toBeNull();
+    expect(parseStandaloneComposerSlashInvocation("/share")).toBeNull();
+    expect(parseStandaloneComposerSlashInvocation("/clear")).toBeNull();
   });
 });

@@ -2,11 +2,14 @@
 import "../index.css";
 
 import {
+  DEFAULT_MODEL_BY_PROVIDER,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
+  type ProviderKind,
   type ServerConfig,
+  type ServerOpenCodeState,
   type ThreadId,
   type WsWelcomePayload,
   WS_CHANNELS,
@@ -51,6 +54,7 @@ interface WsRequestEnvelope {
 interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
+  openCodeState?: ServerOpenCodeState;
   welcome: WsWelcomePayload;
 }
 
@@ -119,6 +123,72 @@ function createBaseServerConfig(): ServerConfig {
     ],
     availableEditors: [],
   };
+}
+
+function createReadyProviderStatus(provider: ProviderKind) {
+  return {
+    provider,
+    status: "ready" as const,
+    available: true,
+    authStatus: "authenticated" as const,
+    checkedAt: NOW_ISO,
+  };
+}
+
+function createUnavailableOpenCodeState(): ServerOpenCodeState {
+  return {
+    status: "unavailable",
+    fetchedAt: NOW_ISO,
+    checkedCwd: "/repo/project",
+    binaryPath: "opencode",
+    credentials: [],
+    models: [],
+    mcpSupported: false,
+    mcpServers: [],
+    configSources: [],
+    message: "OpenCode runtime query failed.",
+  };
+}
+
+function withActiveThreadProvider(
+  snapshot: OrchestrationReadModel,
+  provider: ProviderKind,
+): OrchestrationReadModel {
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? {
+            ...thread,
+            model: DEFAULT_MODEL_BY_PROVIDER[provider],
+            session: thread.session
+              ? {
+                  ...thread.session,
+                  providerName: provider,
+                }
+              : thread.session,
+          }
+        : thread,
+    ),
+  };
+}
+
+function normalizeTextContent(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function queryCommandMenuItemByText(text: string): HTMLElement | null {
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>('[data-slot="command-item"]')).find((item) =>
+      normalizeTextContent(item.textContent).includes(text),
+    ) ?? null
+  );
+}
+
+function queryCommandMenuItemsText(): string[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-slot="command-item"]')).map(
+    (item) => normalizeTextContent(item.textContent),
+  );
 }
 
 function createUserMessage(options: {
@@ -248,6 +318,7 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
   return {
     snapshot,
     serverConfig: createBaseServerConfig(),
+    openCodeState: createUnavailableOpenCodeState(),
     welcome: {
       cwd: "/repo/project",
       projectName: "Project",
@@ -393,6 +464,9 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
+  if (tag === WS_METHODS.serverGetOpenCodeState) {
+    return fixture.openCodeState ?? createUnavailableOpenCodeState();
+  }
   if (tag === WS_METHODS.gitListBranches) {
     return {
       isRepo: true,
@@ -535,6 +609,23 @@ async function waitForElement<T extends Element>(
     throw new Error(errorMessage);
   }
   return element;
+}
+
+async function waitForCommandMenuItem(text: string): Promise<HTMLElement> {
+  return waitForElement(
+    () => queryCommandMenuItemByText(text),
+    `Unable to find command menu item containing "${text}".`,
+  );
+}
+
+async function waitForCommandMenuEmptyState(text: string): Promise<HTMLElement> {
+  return waitForElement(
+    () =>
+      Array.from(document.querySelectorAll<HTMLElement>("p")).find(
+        (element) => normalizeTextContent(element.textContent) === text,
+      ) ?? null,
+    `Unable to find command menu empty state "${text}".`,
+  );
 }
 
 async function waitForURL(
@@ -1089,6 +1180,227 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it.each([
+    {
+      provider: "codex" as const,
+      supportsMcp: true,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("codex")],
+          mcpServers: [
+            {
+              provider: "codex",
+              supported: true,
+              servers: [
+                {
+                  name: "context7",
+                  enabled: true,
+                  state: "enabled",
+                  authStatus: "o_auth",
+                  toolCount: 1,
+                  resourceCount: 0,
+                  resourceTemplateCount: 0,
+                },
+              ],
+            },
+            { provider: "copilot", supported: false, servers: [] },
+            { provider: "kimi", supported: false, servers: [] },
+            { provider: "opencode", supported: false, servers: [] },
+          ],
+        };
+      },
+    },
+    {
+      provider: "opencode" as const,
+      supportsMcp: true,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("opencode")],
+        };
+        nextFixture.openCodeState = {
+          ...createUnavailableOpenCodeState(),
+          status: "available",
+          mcpSupported: true,
+          mcpServers: [
+            {
+              name: "sentry",
+              enabled: true,
+              state: "enabled",
+              authStatus: "o_auth",
+              toolCount: 0,
+              resourceCount: 0,
+              resourceTemplateCount: 0,
+              connectionStatus: "connected",
+            },
+          ],
+        };
+      },
+    },
+    {
+      provider: "copilot" as const,
+      supportsMcp: false,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("copilot")],
+          mcpServers: [{ provider: "copilot", supported: false, servers: [] }],
+        };
+      },
+    },
+    {
+      provider: "kimi" as const,
+      supportsMcp: false,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("kimi")],
+          mcpServers: [{ provider: "kimi", supported: false, servers: [] }],
+        };
+      },
+    },
+  ])("shows /mcp in the slash command list only when supported for $provider", async (input) => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "/");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withActiveThreadProvider(
+        createSnapshotForTargetUser({
+          targetMessageId: `msg-user-mcp-command-${input.provider}` as MessageId,
+          targetText: `${input.provider} mcp command test`,
+        }),
+        input.provider,
+      ),
+      configureFixture: input.configureFixture,
+    });
+
+    try {
+      await waitForCommandMenuItem("/model");
+      await vi.waitFor(
+        () => {
+          expect(queryCommandMenuItemByText("/mcp") !== null).toBe(input.supportsMcp);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it.each([
+    {
+      provider: "codex" as const,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("codex")],
+          mcpServers: [
+            {
+              provider: "codex",
+              supported: true,
+              servers: [
+                {
+                  name: "context7",
+                  enabled: true,
+                  state: "enabled",
+                  authStatus: "o_auth",
+                  toolCount: 1,
+                  resourceCount: 0,
+                  resourceTemplateCount: 0,
+                },
+              ],
+            },
+          ],
+        };
+      },
+      expectedItemText: "context7",
+      expectedDescription: "Enabled · OAuth · 1 tool",
+    },
+    {
+      provider: "opencode" as const,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("opencode")],
+        };
+        nextFixture.openCodeState = {
+          ...createUnavailableOpenCodeState(),
+          status: "available",
+          mcpSupported: true,
+          mcpServers: [
+            {
+              name: "sentry",
+              enabled: false,
+              state: "disabled",
+              authStatus: "unknown",
+              toolCount: 0,
+              resourceCount: 0,
+              resourceTemplateCount: 0,
+              connectionStatus: "unknown",
+            },
+          ],
+        };
+      },
+      expectedItemText: "sentry",
+      expectedDescription: "Disabled in OpenCode config",
+    },
+    {
+      provider: "copilot" as const,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("copilot")],
+          mcpServers: [{ provider: "copilot", supported: false, servers: [] }],
+        };
+      },
+      expectedEmptyState: "MCP server browsing is not available for this provider.",
+    },
+    {
+      provider: "kimi" as const,
+      configureFixture: (nextFixture: TestFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [createReadyProviderStatus("kimi")],
+          mcpServers: [{ provider: "kimi", supported: false, servers: [] }],
+        };
+      },
+      expectedEmptyState: "MCP server browsing is not available for this provider.",
+    },
+  ])("renders provider-specific /mcp browser state for $provider", async (input) => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "/mcp");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withActiveThreadProvider(
+        createSnapshotForTargetUser({
+          targetMessageId: `msg-user-mcp-browser-${input.provider}` as MessageId,
+          targetText: `${input.provider} mcp browser test`,
+        }),
+        input.provider,
+      ),
+      configureFixture: input.configureFixture,
+    });
+
+    try {
+      await waitForComposerEditor();
+      if (input.expectedEmptyState) {
+        await waitForCommandMenuEmptyState(input.expectedEmptyState);
+        expect(queryCommandMenuItemsText()).toEqual([]);
+        return;
+      }
+
+      const expectedItemText = input.expectedItemText!;
+      const expectedDescription = input.expectedDescription!;
+      const item = await waitForCommandMenuItem(expectedItemText);
+      const itemText = normalizeTextContent(item.textContent);
+      expect(itemText).toContain(expectedItemText);
+      expect(itemText).toContain(expectedDescription);
     } finally {
       await mounted.cleanup();
     }
