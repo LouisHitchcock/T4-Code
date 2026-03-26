@@ -1,6 +1,16 @@
-import type { Thread } from "../types";
+import type { Project, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { findLatestProposedPlan, isLatestTurnSettled } from "../session-logic";
+import {
+  buildProjectRecencyById,
+  compareProjectsForSidebar,
+  compareThreadsByRecency,
+  isArchivedVisible,
+  matchesSidebarSearch,
+  type SidebarArchiveFilterMode,
+  type SidebarProjectSortMode,
+} from "../lib/threadOrdering";
+import type { ProjectId, ThreadId } from "@t3tools/contracts";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export type SidebarNewThreadEnvMode = "local" | "worktree";
@@ -144,4 +154,115 @@ export function resolveThreadStatusPill(input: {
   }
 
   return null;
+}
+
+export interface SidebarThreadEntry {
+  thread: Thread;
+  isPinned: boolean;
+  isArchived: boolean;
+}
+
+export interface SidebarProjectEntry {
+  project: Project;
+  isPinned: boolean;
+  isArchived: boolean;
+  matchedProject: boolean;
+  threads: SidebarThreadEntry[];
+  orderedThreadIds: ThreadId[];
+}
+
+export function buildSidebarProjectEntries(input: {
+  projects: readonly Project[];
+  threads: readonly Thread[];
+  query: string;
+  filterMode: SidebarArchiveFilterMode;
+  projectSortMode: SidebarProjectSortMode;
+  pinnedProjectIds?: ReadonlySet<ProjectId>;
+  archivedProjectIds?: ReadonlySet<ProjectId>;
+  pinnedThreadIds?: ReadonlySet<ThreadId>;
+  archivedThreadIds?: ReadonlySet<ThreadId>;
+}): SidebarProjectEntry[] {
+  const pinnedProjectIds = input.pinnedProjectIds ?? new Set<ProjectId>();
+  const archivedProjectIds = input.archivedProjectIds ?? new Set<ProjectId>();
+  const pinnedThreadIds = input.pinnedThreadIds ?? new Set<ThreadId>();
+  const archivedThreadIds = input.archivedThreadIds ?? new Set<ThreadId>();
+  const manualOrderByProjectId = new Map(
+    input.projects.map((project, index) => [project.id, index] as const),
+  );
+  const projectRecencyById = buildProjectRecencyById({
+    projects: input.projects,
+    threads: input.threads,
+  });
+
+  return input.projects
+    .toSorted((left, right) =>
+      compareProjectsForSidebar({
+        left,
+        right,
+        pinnedProjectIds,
+        projectRecencyById,
+        manualOrderByProjectId,
+        sortMode: input.projectSortMode,
+      }),
+    )
+    .flatMap((project) => {
+      const isProjectArchived = archivedProjectIds.has(project.id);
+      const visibleProjectThreads = input.threads
+        .filter((thread) => thread.projectId === project.id)
+        .toSorted((left, right) => {
+          const leftPinned = pinnedThreadIds.has(left.id);
+          const rightPinned = pinnedThreadIds.has(right.id);
+          if (leftPinned !== rightPinned) {
+            return leftPinned ? -1 : 1;
+          }
+          return compareThreadsByRecency(left, right);
+        })
+        .filter((thread) =>
+          isArchivedVisible({
+            archived: archivedThreadIds.has(thread.id),
+            filterMode: input.filterMode,
+          }),
+        );
+      const projectVisibleByArchive = isArchivedVisible({
+        archived: isProjectArchived,
+        filterMode: input.filterMode,
+      });
+
+      if (!projectVisibleByArchive && visibleProjectThreads.length === 0) {
+        return [];
+      }
+
+      const matchedProject = matchesSidebarSearch({
+        query: input.query,
+        project,
+      });
+      const matchingThreads = visibleProjectThreads.filter((thread) =>
+        matchesSidebarSearch({
+          query: input.query,
+          project,
+          thread,
+        }),
+      );
+
+      if (input.query.trim().length > 0 && !matchedProject && matchingThreads.length === 0) {
+        return [];
+      }
+
+      const threads = (matchedProject ? visibleProjectThreads : matchingThreads).map((thread) => ({
+        thread,
+        isPinned: pinnedThreadIds.has(thread.id),
+        isArchived: archivedThreadIds.has(thread.id),
+      }));
+
+      return [
+        {
+          project,
+          isPinned: pinnedProjectIds.has(project.id),
+          isArchived: isProjectArchived,
+          matchedProject,
+          threads,
+          orderedThreadIds: threads.map((entry) => entry.thread.id),
+        },
+      ];
+    });
 }

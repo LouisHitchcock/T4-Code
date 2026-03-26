@@ -70,6 +70,13 @@ Settings also keeps a few cross-provider behavior defaults:
 - **Show tool details**
   - Show or hide work-log entries in the main timeline without affecting the separate task panel or approval prompts
 
+The sidebar keeps additional organization state locally on the current device:
+
+- pinned projects and pinned threads stay above unpinned items
+- archived projects and archived threads are hidden from the default `Active` view but stay available under `All` or `Archived`
+- project order can switch between `Recent` and `Manual`
+- each project shows the 10 most recent matching threads before you expand the remainder with `Show more`
+
 ## Models
 
 The **Models** section currently exposes three kinds of model-related settings.
@@ -154,6 +161,18 @@ Codex also has a per-turn `Fast Mode` toggle in the composer controls. This is s
 
 CUT3 hides the "token context left" UI for OpenRouter-routed models because the routed model can change and the remaining-context display is not reliable enough there.
 
+### Image attachments
+
+The composer also supports lightweight image input:
+
+- attach images with the paperclip button, drag-and-drop, or paste
+- CUT3 accepts image files only
+- each message can include up to `8` images
+- each image is limited to `10MB`
+- attached images render as inline previews in the composer and thread timeline
+- when a message only includes images, CUT3 sends a small bootstrap prompt so providers still receive a valid user turn
+- thread export/bootstrap text includes attachment names and metadata instead of re-embedding image bytes
+
 ### Workspace instructions and command templates
 
 The composer now surfaces repo-owned workspace behavior directly:
@@ -165,6 +184,16 @@ The composer now surfaces repo-owned workspace behavior directly:
 - Template frontmatter supports `description`, optional `provider`, optional `model`, optional `interactionMode`, optional `runtimeMode`, and optional `sendImmediately`.
 - Template bodies can interpolate `$ARGUMENTS` and `$1` through `$9`.
 - When `sendImmediately: true` is set, CUT3 expands the template and dispatches the turn directly. Otherwise it expands into the composer for review before sending.
+
+### Follow-up queueing and steering
+
+When a turn is already running, the composer exposes follow-up controls instead of silently ignoring the next message:
+
+- `Queue` adds the current draft as the next queued follow-up
+- `Steer` interrupts the running turn and sends the new follow-up next
+- `Enter` uses the currently selected Queue/Steer mode while a turn is running
+- `Cmd/Ctrl+Enter` uses the opposite Queue/Steer mode for that one follow-up
+- queued follow-ups can be reordered, retried, or removed from the inline queue panel
 
 ### Repo-local skills
 

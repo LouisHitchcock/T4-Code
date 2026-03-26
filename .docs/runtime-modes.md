@@ -26,12 +26,15 @@ The plan sidebar also supports:
 
 The thread surface also exposes history and collaboration controls that build on top of runtime mode:
 
+- **Queue / Steer follow-ups**: while a turn is running, the composer can queue the next follow-up or steer the run by interrupting the current turn and sending the new message next. `Enter` uses the selected Queue/Steer mode, and `Cmd/Ctrl+Enter` uses the opposite mode for that one follow-up.
 - **Share / Revoke**: create or revoke a read-only shared snapshot. Shared links open in a dedicated route that can import the snapshot into another local project.
 - **Compact thread**: write a continuation-summary boundary so the thread can keep going with a smaller context footprint.
 - **Undo / Redo**: move through recent restore snapshots without manually selecting checkpoints.
 - **Fork / Export**: keep the existing fork and export controls from the thread actions menu, message actions, and diff panel.
 
 These controls are also reachable from the composer with built-in slash commands such as `/share`, `/unshare`, `/compact`, `/undo`, `/redo`, `/export`, and `/details`.
+
+The sidebar now complements those controls with project/thread search, local pin/archive state, active/all/archived filters, project recent/manual sort, and a default 10-thread preview per project before `Show more` expands the rest.
 
 ## Sharing modes
 

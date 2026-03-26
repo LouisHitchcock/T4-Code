@@ -20,7 +20,6 @@ function DiffWorkerPoolInitGuard() {
   useEffect(() => {
     if (!workerPool) return;
     // `initialized` is `false | Promise<void> | true` on WorkerPoolManager.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing internal library field
     const pending = (workerPool as unknown as Record<string, unknown>).initialized;
     if (pending && typeof (pending as Promise<void>).catch === "function") {
       (pending as Promise<void>).catch(() => undefined);

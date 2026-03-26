@@ -1694,6 +1694,185 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("queues a follow-up while a turn is running and drains it after the session settles", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-queued-follow-up" as MessageId,
+        targetText: "queued follow-up target",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "queued from browser test");
+
+      const queueButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Queue follow-up",
+          ) as HTMLButtonElement | null,
+        "Unable to find the queue follow-up button.",
+      );
+      queueButton.click();
+
+      await expect.element(page.getByText("Queued follow-ups")).toBeInTheDocument();
+      expect(
+        wsRequests.some(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.command &&
+            typeof request.command === "object" &&
+            !Array.isArray(request.command) &&
+            "type" in request.command &&
+            request.command.type === "thread.turn.start",
+        ),
+      ).toBe(false);
+
+      useStore.getState().syncServerReadModel(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-user-queued-follow-up" as MessageId,
+          targetText: "queued follow-up target",
+          sessionStatus: "ready",
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const turnStartRequest = wsRequests.find((request) => {
+            const command = request.command as Record<string, unknown> | undefined;
+            const message =
+              command?.message && typeof command.message === "object"
+                ? (command.message as Record<string, unknown>)
+                : null;
+            return (
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              command?.type === "thread.turn.start" &&
+              message?.text === "queued from browser test"
+            );
+          });
+          expect(turnStartRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("interrupts the current turn when Send now is used for a follow-up", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-send-now" as MessageId,
+        targetText: "send now target",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "send-now follow-up");
+
+      const steerToggle = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Steer",
+          ) as HTMLButtonElement | null,
+        "Unable to find the steer toggle button.",
+      );
+      steerToggle.click();
+
+      const sendNowButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Send now",
+          ) as HTMLButtonElement | null,
+        "Unable to find the send-now button.",
+      );
+      sendNowButton.click();
+
+      await vi.waitFor(
+        () => {
+          const interruptRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.command &&
+              typeof request.command === "object" &&
+              !Array.isArray(request.command) &&
+              "type" in request.command &&
+              request.command.type === "thread.turn.interrupt",
+          );
+          expect(interruptRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      useStore.getState().syncServerReadModel(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-user-send-now" as MessageId,
+          targetText: "send now target",
+          sessionStatus: "ready",
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const turnStartRequest = wsRequests.find((request) => {
+            const command = request.command as Record<string, unknown> | undefined;
+            const message =
+              command?.message && typeof command.message === "object"
+                ? (command.message as Record<string, unknown>)
+                : null;
+            return (
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              command?.type === "thread.turn.start" &&
+              message?.text === "send-now follow-up"
+            );
+          });
+          expect(turnStartRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("scrolls back to the bottom when a new message is sent from above the fold", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-scroll-send" as MessageId,
+        targetText: "scroll send target",
+      }),
+    });
+
+    try {
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+        "Unable to find ChatView message scroll container.",
+      );
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "scroll me back down");
+      const sendButton = await waitForComposerControl("primary-action");
+      await sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const remaining =
+            scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
+          expect(remaining).toBeLessThan(32);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("dispatches approval responses from the browser composer actions", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

@@ -1,10 +1,14 @@
 import {
+  ArchiveIcon,
   ArrowLeftIcon,
+  ArrowUpDownIcon,
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
+  PinIcon,
   PlusIcon,
   RocketIcon,
+  SearchIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -41,7 +45,7 @@ import { getAppLanguageDetails, type AppLanguage } from "../appLanguage";
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_VERSION } from "../branding";
 import { resolveServerHttpUrl } from "../lib/serverUrl";
-import { isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
 import { shortcutLabelForCommand } from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
@@ -87,15 +91,18 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  buildSidebarProjectEntries,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useSidebarPreferencesStore } from "../sidebarPreferencesStore";
+import { compareThreadsByRecency, type SidebarArchiveFilterMode } from "../lib/threadOrdering";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
-const THREAD_PREVIEW_LIMIT = 6;
+const THREAD_PREVIEW_LIMIT = 10;
 
 function getSidebarCopy(language: AppLanguage) {
   if (language === "fa") {
@@ -130,6 +137,14 @@ function getSidebarCopy(language: AppLanguage) {
       failedToCopyThreadId: "کپی شناسه رشته انجام نشد",
       renameThread: "تغییر نام رشته",
       markUnread: "علامت گذاری به عنوان خوانده نشده",
+      pinThread: "سنجاق کردن رشته",
+      unpinThread: "برداشتن سنجاق رشته",
+      archiveThread: "بایگانی رشته",
+      unarchiveThread: "خارج کردن رشته از بایگانی",
+      pinProject: "سنجاق کردن پروژه",
+      unpinProject: "برداشتن سنجاق پروژه",
+      archiveProject: "بایگانی پروژه",
+      unarchiveProject: "خارج کردن پروژه از بایگانی",
       copyThreadId: "کپی شناسه رشته",
       delete: "حذف",
       deleteThreadPrompt: (title: string) => `رشته "${title}" حذف شود؟`,
@@ -148,6 +163,13 @@ function getSidebarCopy(language: AppLanguage) {
       downloadArmBuild: "دانلود نسخه ARM",
       installArmBuild: "نصب نسخه ARM",
       projects: "پروژه ها",
+      sidebarSearchPlaceholder: "جستجوی پروژه ها و رشته ها",
+      activeItems: "فعال",
+      archivedItems: "بایگانی شده",
+      allItems: "همه",
+      sortByRecent: "مرتب سازی بر اساس تازگی",
+      sortByManual: "ترتیب دستی",
+      noMatchingItems: "موردی پیدا نشد",
       addProject: "افزودن پروژه",
       pickingFolder: "در حال انتخاب پوشه...",
       browseForFolder: "انتخاب پوشه",
@@ -219,6 +241,14 @@ function getSidebarCopy(language: AppLanguage) {
     failedToCopyThreadId: "Failed to copy thread ID",
     renameThread: "Rename thread",
     markUnread: "Mark unread",
+    pinThread: "Pin thread",
+    unpinThread: "Unpin thread",
+    archiveThread: "Archive thread",
+    unarchiveThread: "Unarchive thread",
+    pinProject: "Pin project",
+    unpinProject: "Unpin project",
+    archiveProject: "Archive project",
+    unarchiveProject: "Unarchive project",
     copyThreadId: "Copy Thread ID",
     delete: "Delete",
     deleteThreadPrompt: (title: string) => `Delete thread "${title}"?`,
@@ -236,6 +266,13 @@ function getSidebarCopy(language: AppLanguage) {
     downloadArmBuild: "Download ARM build",
     installArmBuild: "Install ARM build",
     projects: "Projects",
+    sidebarSearchPlaceholder: "Search projects and threads",
+    activeItems: "Active",
+    archivedItems: "Archived",
+    allItems: "All",
+    sortByRecent: "Recent",
+    sortByManual: "Manual",
+    noMatchingItems: "No matching items",
     addProject: "Add project",
     pickingFolder: "Picking folder...",
     browseForFolder: "Browse for folder",
@@ -429,6 +466,17 @@ export default function Sidebar() {
   const markThreadUnread = useStore((store) => store.markThreadUnread);
   const toggleProject = useStore((store) => store.toggleProject);
   const reorderProjects = useStore((store) => store.reorderProjects);
+  const pinnedProjectIds = useSidebarPreferencesStore((store) => store.pinnedProjectIds);
+  const archivedProjectIds = useSidebarPreferencesStore((store) => store.archivedProjectIds);
+  const pinnedThreadIds = useSidebarPreferencesStore((store) => store.pinnedThreadIds);
+  const archivedThreadIds = useSidebarPreferencesStore((store) => store.archivedThreadIds);
+  const projectSortMode = useSidebarPreferencesStore((store) => store.projectSortMode);
+  const setProjectPinned = useSidebarPreferencesStore((store) => store.setProjectPinned);
+  const setProjectArchived = useSidebarPreferencesStore((store) => store.setProjectArchived);
+  const setThreadPinned = useSidebarPreferencesStore((store) => store.setThreadPinned);
+  const setThreadArchived = useSidebarPreferencesStore((store) => store.setThreadArchived);
+  const setProjectSortMode = useSidebarPreferencesStore((store) => store.setProjectSortMode);
+  const pruneMissingSidebarPreferences = useSidebarPreferencesStore((store) => store.pruneMissing);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearThreadDraft);
   const getDraftThreadByProjectId = useComposerDraftStore(
     (store) => store.getDraftThreadByProjectId,
@@ -467,6 +515,13 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
+  const [sidebarArchiveFilterMode, setSidebarArchiveFilterMode] =
+    useState<SidebarArchiveFilterMode>("active");
+  const canReorderProjects =
+    projectSortMode === "manual" &&
+    sidebarSearchQuery.trim().length === 0 &&
+    sidebarArchiveFilterMode === "active";
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
@@ -484,6 +539,38 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
   );
+  const sidebarProjectEntries = useMemo(
+    () =>
+      buildSidebarProjectEntries({
+        projects,
+        threads,
+        query: sidebarSearchQuery,
+        filterMode: sidebarArchiveFilterMode,
+        projectSortMode,
+        pinnedProjectIds,
+        archivedProjectIds,
+        pinnedThreadIds,
+        archivedThreadIds,
+      }),
+    [
+      archivedProjectIds,
+      archivedThreadIds,
+      pinnedProjectIds,
+      pinnedThreadIds,
+      projectSortMode,
+      projects,
+      sidebarArchiveFilterMode,
+      sidebarSearchQuery,
+      threads,
+    ],
+  );
+  useEffect(() => {
+    pruneMissingSidebarPreferences({
+      projectIds: projects.map((project) => project.id),
+      threadIds: threads.map((thread) => thread.id),
+    });
+  }, [projects, pruneMissingSidebarPreferences, threads]);
+
   const navigateToThread = useCallback(
     (threadId: ThreadId) => {
       if (isMobile) {
@@ -572,17 +659,20 @@ export default function Sidebar() {
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
       const latestThread = threads
-        .filter((thread) => thread.projectId === projectId)
-        .toSorted((a, b) => {
-          const byDate = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          if (byDate !== 0) return byDate;
-          return b.id.localeCompare(a.id);
+        .filter((thread) => thread.projectId === projectId && !archivedThreadIds.has(thread.id))
+        .toSorted((left, right) => {
+          const leftPinned = pinnedThreadIds.has(left.id);
+          const rightPinned = pinnedThreadIds.has(right.id);
+          if (leftPinned !== rightPinned) {
+            return leftPinned ? -1 : 1;
+          }
+          return compareThreadsByRecency(left, right);
         })[0];
       if (!latestThread) return;
 
       navigateToThread(latestThread.id);
     },
-    [navigateToThread, threads],
+    [archivedThreadIds, navigateToThread, pinnedThreadIds, threads],
   );
 
   const addProjectFromPath = useCallback(
@@ -906,17 +996,27 @@ export default function Sidebar() {
     async (threadId: ThreadId, position: { x: number; y: number }) => {
       const api = readNativeApi();
       if (!api) return;
+      const thread = threads.find((t) => t.id === threadId);
+      if (!thread) return;
+      const threadPinned = pinnedThreadIds.has(threadId);
+      const threadArchived = archivedThreadIds.has(threadId);
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: sidebarCopy.renameThread },
           { id: "mark-unread", label: sidebarCopy.markUnread },
+          {
+            id: threadPinned ? "unpin" : "pin",
+            label: threadPinned ? sidebarCopy.unpinThread : sidebarCopy.pinThread,
+          },
+          {
+            id: threadArchived ? "unarchive" : "archive",
+            label: threadArchived ? sidebarCopy.unarchiveThread : sidebarCopy.archiveThread,
+          },
           { id: "copy-thread-id", label: sidebarCopy.copyThreadId },
           { id: "delete", label: sidebarCopy.delete, destructive: true },
         ],
         position,
       );
-      const thread = threads.find((t) => t.id === threadId);
-      if (!thread) return;
 
       if (clicked === "rename") {
         setRenamingThreadId(threadId);
@@ -927,6 +1027,17 @@ export default function Sidebar() {
 
       if (clicked === "mark-unread") {
         markThreadUnread(threadId);
+        return;
+      }
+      if (clicked === "pin" || clicked === "unpin") {
+        setThreadPinned(threadId, clicked === "pin");
+        return;
+      }
+      if (clicked === "archive" || clicked === "unarchive") {
+        setThreadArchived(threadId, clicked === "archive");
+        if (clicked === "archive" && selectedThreadIds.has(threadId)) {
+          removeFromSelection([threadId]);
+        }
         return;
       }
       if (clicked === "copy-thread-id") {
@@ -948,9 +1059,15 @@ export default function Sidebar() {
     },
     [
       appSettings.confirmThreadDelete,
+      archivedThreadIds,
       copyToClipboard,
       deleteThread,
       markThreadUnread,
+      pinnedThreadIds,
+      removeFromSelection,
+      selectedThreadIds,
+      setThreadArchived,
+      setThreadPinned,
       sidebarCopy,
       threads,
     ],
@@ -1045,14 +1162,33 @@ export default function Sidebar() {
     async (projectId: ProjectId, position: { x: number; y: number }) => {
       const api = readNativeApi();
       if (!api) return;
-      const clicked = await api.contextMenu.show(
-        [{ id: "delete", label: sidebarCopy.removeProject, destructive: true }],
-        position,
-      );
-      if (clicked !== "delete") return;
-
       const project = projects.find((entry) => entry.id === projectId);
       if (!project) return;
+      const projectPinned = pinnedProjectIds.has(projectId);
+      const projectArchived = archivedProjectIds.has(projectId);
+      const clicked = await api.contextMenu.show(
+        [
+          {
+            id: projectPinned ? "unpin" : "pin",
+            label: projectPinned ? sidebarCopy.unpinProject : sidebarCopy.pinProject,
+          },
+          {
+            id: projectArchived ? "unarchive" : "archive",
+            label: projectArchived ? sidebarCopy.unarchiveProject : sidebarCopy.archiveProject,
+          },
+          { id: "delete", label: sidebarCopy.removeProject, destructive: true },
+        ],
+        position,
+      );
+      if (clicked === "pin" || clicked === "unpin") {
+        setProjectPinned(projectId, clicked === "pin");
+        return;
+      }
+      if (clicked === "archive" || clicked === "unarchive") {
+        setProjectArchived(projectId, clicked === "archive");
+        return;
+      }
+      if (clicked !== "delete") return;
 
       const projectThreads = threads.filter((thread) => thread.projectId === projectId);
       if (projectThreads.length > 0) {
@@ -1090,10 +1226,14 @@ export default function Sidebar() {
       }
     },
     [
+      archivedProjectIds,
       clearComposerDraftForThread,
       clearProjectDraftThreadId,
       getDraftThreadByProjectId,
+      pinnedProjectIds,
       projects,
+      setProjectArchived,
+      setProjectPinned,
       sidebarCopy,
       threads,
     ],
@@ -1116,6 +1256,7 @@ export default function Sidebar() {
   const handleProjectDragEnd = useCallback(
     (event: DragEndEvent) => {
       dragInProgressRef.current = false;
+      if (!canReorderProjects) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const activeProject = projects.find((project) => project.id === active.id);
@@ -1123,21 +1264,26 @@ export default function Sidebar() {
       if (!activeProject || !overProject) return;
       reorderProjects(activeProject.id, overProject.id);
     },
-    [projects, reorderProjects],
+    [canReorderProjects, projects, reorderProjects],
   );
 
-  const handleProjectDragStart = useCallback((_event: DragStartEvent) => {
-    dragInProgressRef.current = true;
-    suppressProjectClickAfterDragRef.current = true;
-  }, []);
+  const handleProjectDragStart = useCallback(
+    (_event: DragStartEvent) => {
+      if (!canReorderProjects) return;
+      dragInProgressRef.current = true;
+      suppressProjectClickAfterDragRef.current = true;
+    },
+    [canReorderProjects],
+  );
 
   const handleProjectDragCancel = useCallback((_event: DragCancelEvent) => {
     dragInProgressRef.current = false;
   }, []);
 
   const handleProjectTitlePointerDownCapture = useCallback(() => {
+    if (!canReorderProjects) return;
     suppressProjectClickAfterDragRef.current = false;
-  }, []);
+  }, [canReorderProjects]);
 
   const handleProjectTitleClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>, projectId: ProjectId) => {
@@ -1423,26 +1569,90 @@ export default function Sidebar() {
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
               {sidebarCopy.projects}
             </span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={sidebarCopy.addProject}
-                    aria-pressed={shouldShowProjectPathEntry}
-                    className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                    onClick={handleStartAddProject}
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={
+                        projectSortMode === "recent"
+                          ? sidebarCopy.sortByRecent
+                          : sidebarCopy.sortByManual
+                      }
+                      className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      onClick={() =>
+                        setProjectSortMode(projectSortMode === "recent" ? "manual" : "recent")
+                      }
+                    />
+                  }
+                >
+                  <ArrowUpDownIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup side="right">
+                  {projectSortMode === "recent"
+                    ? sidebarCopy.sortByRecent
+                    : sidebarCopy.sortByManual}
+                </TooltipPopup>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={sidebarCopy.addProject}
+                      aria-pressed={shouldShowProjectPathEntry}
+                      className="inline-flex size-5 items-center justify-center rounded-md text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      onClick={handleStartAddProject}
+                    />
+                  }
+                >
+                  <PlusIcon
+                    className={`size-3.5 transition-transform duration-150 ${
+                      shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
+                    }`}
                   />
-                }
-              >
-                <PlusIcon
-                  className={`size-3.5 transition-transform duration-150 ${
-                    shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
+                </TooltipTrigger>
+                <TooltipPopup side="right">{sidebarCopy.addProject}</TooltipPopup>
+              </Tooltip>
+            </div>
+          </div>
+
+          <div className="mb-2 space-y-2 px-1">
+            <label className="relative block">
+              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/55" />
+              <input
+                type="search"
+                aria-label={sidebarCopy.sidebarSearchPlaceholder}
+                className="w-full rounded-md border border-border bg-secondary pl-7 pr-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/45 focus:border-ring focus:outline-none"
+                placeholder={sidebarCopy.sidebarSearchPlaceholder}
+                value={sidebarSearchQuery}
+                onChange={(event) => setSidebarSearchQuery(event.target.value)}
+              />
+            </label>
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  ["active", sidebarCopy.activeItems],
+                  ["all", sidebarCopy.allItems],
+                  ["archived", sidebarCopy.archivedItems],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+                    sidebarArchiveFilterMode === mode
+                      ? "border-primary/35 bg-primary/10 text-primary"
+                      : "border-border bg-background/70 text-muted-foreground hover:bg-accent hover:text-foreground"
                   }`}
-                />
-              </TooltipTrigger>
-              <TooltipPopup side="right">{sidebarCopy.addProject}</TooltipPopup>
-            </Tooltip>
+                  aria-pressed={sidebarArchiveFilterMode === mode}
+                  onClick={() => setSidebarArchiveFilterMode(mode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {shouldShowProjectPathEntry && (
@@ -1520,25 +1730,19 @@ export default function Sidebar() {
           >
             <SidebarMenu>
               <SortableContext
-                items={projects.map((project) => project.id)}
+                items={sidebarProjectEntries.map((entry) => entry.project.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {projects.map((project) => {
-                  const projectThreads = threads
-                    .filter((thread) => thread.projectId === project.id)
-                    .toSorted((a, b) => {
-                      const byDate =
-                        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-                      if (byDate !== 0) return byDate;
-                      return b.id.localeCompare(a.id);
-                    });
+                {sidebarProjectEntries.map((entry) => {
+                  const { project } = entry;
+                  const projectThreads = entry.threads;
                   const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
                   const hasHiddenThreads = projectThreads.length > THREAD_PREVIEW_LIMIT;
                   const visibleThreads =
                     hasHiddenThreads && !isThreadListExpanded
                       ? projectThreads.slice(0, THREAD_PREVIEW_LIMIT)
                       : projectThreads;
-                  const orderedProjectThreadIds = projectThreads.map((t) => t.id);
+                  const orderedProjectThreadIds = entry.orderedThreadIds;
 
                   return (
                     <SortableProjectItem key={project.id} projectId={project.id}>
@@ -1547,10 +1751,20 @@ export default function Sidebar() {
                           <div className="group/project-header relative">
                             <SidebarMenuButton
                               size="sm"
-                              className="gap-2 px-2 py-1.5 text-left cursor-grab active:cursor-grabbing hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground"
-                              {...dragHandleProps.attributes}
-                              {...dragHandleProps.listeners}
-                              onPointerDownCapture={handleProjectTitlePointerDownCapture}
+                              className={cn(
+                                "gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground",
+                                canReorderProjects
+                                  ? "cursor-grab active:cursor-grabbing"
+                                  : "cursor-default",
+                                entry.isArchived && "opacity-65",
+                              )}
+                              {...(canReorderProjects ? dragHandleProps.attributes : {})}
+                              {...(canReorderProjects ? dragHandleProps.listeners : {})}
+                              onPointerDownCapture={
+                                canReorderProjects
+                                  ? handleProjectTitlePointerDownCapture
+                                  : undefined
+                              }
                               onClick={(event) => handleProjectTitleClick(event, project.id)}
                               onKeyDown={(event) => handleProjectTitleKeyDown(event, project.id)}
                               onContextMenu={(event) => {
@@ -1570,6 +1784,14 @@ export default function Sidebar() {
                               <span className="flex-1 truncate text-xs font-medium text-foreground/90">
                                 {project.name}
                               </span>
+                              <div className="flex items-center gap-1 text-muted-foreground/60">
+                                {entry.isPinned ? (
+                                  <PinIcon className="size-3" aria-hidden="true" />
+                                ) : null}
+                                {entry.isArchived ? (
+                                  <ArchiveIcon className="size-3" aria-hidden="true" />
+                                ) : null}
+                              </div>
                             </SidebarMenuButton>
                             <Tooltip>
                               <TooltipTrigger
@@ -1608,7 +1830,8 @@ export default function Sidebar() {
 
                           <CollapsibleContent keepMounted>
                             <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
-                              {visibleThreads.map((thread) => {
+                              {visibleThreads.map((threadEntry) => {
+                                const thread = threadEntry.thread;
                                 const isActive = routeThreadId === thread.id;
                                 const isSelected = selectedThreadIds.has(thread.id);
                                 const isHighlighted = isActive || isSelected;
@@ -1639,10 +1862,13 @@ export default function Sidebar() {
                                       render={<div role="button" tabIndex={0} />}
                                       size="sm"
                                       isActive={isActive}
-                                      className={resolveThreadRowClassName({
-                                        isActive,
-                                        isSelected,
-                                      })}
+                                      className={cn(
+                                        resolveThreadRowClassName({
+                                          isActive,
+                                          isSelected,
+                                        }),
+                                        threadEntry.isArchived && "opacity-65",
+                                      )}
                                       onClick={(event) => {
                                         handleThreadClick(
                                           event,
@@ -1702,6 +1928,18 @@ export default function Sidebar() {
                                             </TooltipPopup>
                                           </Tooltip>
                                         )}
+                                        {threadEntry.isPinned ? (
+                                          <PinIcon
+                                            className="size-3 shrink-0 text-muted-foreground/70"
+                                            aria-hidden="true"
+                                          />
+                                        ) : null}
+                                        {threadEntry.isArchived ? (
+                                          <ArchiveIcon
+                                            className="size-3 shrink-0 text-muted-foreground/70"
+                                            aria-hidden="true"
+                                          />
+                                        ) : null}
                                         {threadStatus && (
                                           <span
                                             className={`inline-flex items-center gap-1 text-[10px] ${threadStatus.colorClass}`}
@@ -1785,7 +2023,7 @@ export default function Sidebar() {
                                           }`}
                                         >
                                           {formatRelativeTime(
-                                            thread.createdAt,
+                                            thread.updatedAt ?? thread.createdAt,
                                             appSettings.language,
                                           )}
                                         </span>
@@ -1836,9 +2074,9 @@ export default function Sidebar() {
             </SidebarMenu>
           </DndContext>
 
-          {projects.length === 0 && !shouldShowProjectPathEntry && (
+          {sidebarProjectEntries.length === 0 && !shouldShowProjectPathEntry && (
             <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-              {sidebarCopy.noProjectsYet}
+              {projects.length === 0 ? sidebarCopy.noProjectsYet : sidebarCopy.noMatchingItems}
             </div>
           )}
         </SidebarGroup>

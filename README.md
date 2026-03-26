@@ -64,6 +64,8 @@ From the composer:
 - Run built-in slash commands such as `/new` (`/clear`), `/compact` (`/summarize`), `/share`, `/unshare`, `/undo`, `/redo`, `/export`, `/details`, `/init`, `/plan`, `/default`, `/model`, and `/mcp` (when the active provider supports MCP).
 - Type `/` to see those built-in commands plus any templates discovered from `.cut3/commands/*.md`.
 - Open the Skills picker to attach repo-local skills discovered from `.cut3/skills/<name>/SKILL.md`. Skill files must include `name` and `description` frontmatter, and `name` must match the lowercase hyphenated directory name.
+- Attach up to **8 images per message** with the paperclip button, drag-and-drop, or paste. CUT3 accepts image files only, enforces a **10 MB per image** limit, shows inline previews in the composer and thread timeline, and includes attachment names in bootstrap/export summaries.
+- When a turn is already running, use the composer follow-up controls to **Queue** the next message or **Steer** the run so CUT3 interrupts the current turn and sends your new follow-up next. Press `Enter` to use the current Queue/Steer mode, or `Cmd/Ctrl+Enter` to use the opposite mode for that one follow-up.
 - Template frontmatter can set `description`, optional `provider`, optional `model`, optional `interactionMode`, optional `runtimeMode`, and optional `sendImmediately`.
 
 Template bodies support `$ARGUMENTS` plus positional placeholders `$1` through `$9`.
@@ -131,7 +133,7 @@ Runtime mode sets the default sandbox and approval posture for new sessions. Per
 
 When a plan is active, CUT3 can keep it open in a sidebar and export it by copying, downloading markdown, or saving it into the workspace. For Pi, CUT3 drives that mode by sending explicit plan-first instructions and switching Pi onto a read-only tool set for the turn.
 
-Threads also expose collaboration and history controls directly in the chat surface. Use the thread actions menu or the composer slash commands (`/share`, `/unshare`, `/compact`, `/undo`, `/redo`, `/export`, `/details`) to manage the current thread. Shared snapshots open in a dedicated read-only route that can import the snapshot into another local project. Use `Undo` and `Redo` in the thread header to move through recent restore snapshots, use `Fork thread here` on individual messages to branch from that point, and use the diff panel to fork from a completed checkpoint. When a provider emits task lifecycle events, CUT3 shows a compact task panel above the timeline.
+Threads also expose collaboration and history controls directly in the chat surface. Use the thread actions menu or the composer slash commands (`/share`, `/unshare`, `/compact`, `/undo`, `/redo`, `/export`, `/details`) to manage the current thread. Shared snapshots open in a dedicated read-only route that can import the snapshot into another local project. Use `Undo` and `Redo` in the thread header to move through recent restore snapshots, use `Fork thread here` on individual messages to branch from that point, and use the diff panel to fork from a completed checkpoint. The sidebar now supports project/thread search, pinning, active/all/archived filters, project recent/manual sort, and thread archiving, while each project shows the 10 most recent matching threads before `Show more` expands the rest. When a provider emits task lifecycle events, CUT3 shows a compact task panel above the timeline.
 
 For the full details, see [.docs/runtime-modes.md](.docs/runtime-modes.md).
 

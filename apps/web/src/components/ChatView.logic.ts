@@ -33,6 +33,7 @@ export function buildLocalDraftThread(
     messages: [],
     error,
     createdAt: draftThread.createdAt,
+    updatedAt: draftThread.createdAt,
     latestTurn: null,
     lastVisitedAt: draftThread.createdAt,
     branch: draftThread.branch,
@@ -119,6 +120,27 @@ export function cloneComposerImageForRetry(
   } catch {
     return image;
   }
+}
+
+export function revokeComposerImagePreviewUrls(
+  images: ReadonlyArray<ComposerImageAttachment>,
+): void {
+  for (const image of images) {
+    revokeBlobPreviewUrl(image.previewUrl);
+  }
+}
+
+export function collectComposerImagePreviewUrls(
+  images: ReadonlyArray<ComposerImageAttachment>,
+): string[] {
+  const previewUrls: string[] = [];
+  for (const image of images) {
+    if (!image.previewUrl.startsWith("blob:")) {
+      continue;
+    }
+    previewUrls.push(image.previewUrl);
+  }
+  return previewUrls;
 }
 
 export function getCustomModelOptionsByProvider(settings: {

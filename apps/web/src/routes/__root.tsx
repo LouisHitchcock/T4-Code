@@ -38,6 +38,8 @@ import {
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import { selectLatestThreadForNavigation } from "../lib/threadOrdering";
+import { useSidebarPreferencesStore } from "../sidebarPreferencesStore";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -459,6 +461,9 @@ function DesktopProjectBootstrap() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const threadsHydrated = useStore((store) => store.threadsHydrated);
+  const archivedProjectIds = useSidebarPreferencesStore((store) => store.archivedProjectIds);
+  const archivedThreadIds = useSidebarPreferencesStore((store) => store.archivedThreadIds);
+  const pinnedThreadIds = useSidebarPreferencesStore((store) => store.pinnedThreadIds);
   const restoredThreadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -474,26 +479,35 @@ function DesktopProjectBootstrap() {
     const activeProjectId = cwd
       ? (projects.find((project) => project.cwd === cwd)?.id ?? null)
       : null;
-    const candidateThreads = threads.filter((thread) =>
-      activeProjectId ? thread.projectId === activeProjectId : true,
-    );
-    const latestThread = candidateThreads.toSorted((left, right) => {
-      const byCreated = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
-      if (byCreated !== 0) return byCreated;
-      return right.id.localeCompare(left.id);
-    })[0];
+    const latestThreadId = selectLatestThreadForNavigation({
+      threads,
+      activeProjectId,
+      archivedProjectIds,
+      archivedThreadIds,
+      pinnedThreadIds,
+    });
 
-    if (!latestThread || restoredThreadIdRef.current === latestThread.id) {
+    if (!latestThreadId || restoredThreadIdRef.current === latestThreadId) {
       return;
     }
 
-    restoredThreadIdRef.current = latestThread.id;
+    restoredThreadIdRef.current = latestThreadId;
     void navigate({
       to: "/$threadId",
-      params: { threadId: latestThread.id },
+      params: { threadId: latestThreadId },
       replace: true,
     });
-  }, [navigate, pathname, projects, serverConfig?.cwd, threads, threadsHydrated]);
+  }, [
+    archivedProjectIds,
+    archivedThreadIds,
+    navigate,
+    pathname,
+    pinnedThreadIds,
+    projects,
+    serverConfig?.cwd,
+    threads,
+    threadsHydrated,
+  ]);
 
   return null;
 }

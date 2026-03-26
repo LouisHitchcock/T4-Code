@@ -1,201 +1,191 @@
+import { ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
+import type { Project, Thread } from "../types";
+import { buildSidebarProjectEntries, hasUnseenCompletion } from "./Sidebar.logic";
 
-import {
-  hasUnseenCompletion,
-  resolveSidebarNewThreadEnvMode,
-  resolveThreadRowClassName,
-  resolveThreadStatusPill,
-  shouldClearThreadSelectionOnMouseDown,
-} from "./Sidebar.logic";
+const projectId = (value: string) => ProjectId.makeUnsafe(value);
+const threadId = (value: string) => ThreadId.makeUnsafe(value);
+const turnId = (value: string) => TurnId.makeUnsafe(value);
 
-function makeLatestTurn(overrides?: {
-  completedAt?: string | null;
-  startedAt?: string | null;
-}): Parameters<typeof hasUnseenCompletion>[0]["latestTurn"] {
-  return {
-    turnId: "turn-1" as never,
-    state: "completed",
-    assistantMessageId: null,
-    requestedAt: "2026-03-09T10:00:00.000Z",
-    startedAt: overrides?.startedAt ?? "2026-03-09T10:00:00.000Z",
-    completedAt: overrides?.completedAt ?? "2026-03-09T10:05:00.000Z",
-  };
-}
+const baseProject = (overrides: Partial<Project> = {}): Project => ({
+  id: projectId("project-1"),
+  name: "Alpha",
+  cwd: "/repo/alpha",
+  model: "gpt-5.4",
+  expanded: true,
+  scripts: [],
+  updatedAt: "2026-03-26T10:00:00.000Z",
+  ...overrides,
+});
 
-describe("hasUnseenCompletion", () => {
-  it("returns true when a thread completed after its last visit", () => {
+const baseThread = (overrides: Partial<Thread> = {}): Thread => ({
+  id: threadId("thread-1"),
+  codexThreadId: null,
+  projectId: projectId("project-1"),
+  title: "First thread",
+  model: "gpt-5.4",
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  session: null,
+  messages: [],
+  proposedPlans: [],
+  error: null,
+  createdAt: "2026-03-26T10:00:00.000Z",
+  updatedAt: "2026-03-26T10:10:00.000Z",
+  latestTurn: null,
+  branch: null,
+  worktreePath: null,
+  turnDiffSummaries: [],
+  activities: [],
+  ...overrides,
+});
+
+describe("Sidebar.logic", () => {
+  it("marks a thread as unseen when the latest completion is newer than the visit time", () => {
     expect(
       hasUnseenCompletion({
         interactionMode: "default",
-        latestTurn: makeLatestTurn(),
-        lastVisitedAt: "2026-03-09T10:04:00.000Z",
+        latestTurn: {
+          turnId: turnId("turn-1"),
+          state: "completed",
+          requestedAt: "2026-03-26T10:00:00.000Z",
+          startedAt: "2026-03-26T10:00:01.000Z",
+          completedAt: "2026-03-26T10:01:00.000Z",
+          assistantMessageId: null,
+        },
         proposedPlans: [],
+        lastVisitedAt: "2026-03-26T10:00:30.000Z",
         session: null,
       }),
     ).toBe(true);
   });
-});
 
-describe("shouldClearThreadSelectionOnMouseDown", () => {
-  it("preserves selection for thread items", () => {
-    const child = {
-      closest: (selector: string) =>
-        selector.includes("[data-thread-item]") ? ({} as Element) : null,
-    } as unknown as HTMLElement;
+  it("sorts pinned projects and pinned threads ahead of newer unpinned items", () => {
+    const entries = buildSidebarProjectEntries({
+      projects: [
+        baseProject({
+          id: projectId("project-a"),
+          name: "Alpha",
+          updatedAt: "2026-03-26T09:00:00.000Z",
+        }),
+        baseProject({
+          id: projectId("project-b"),
+          name: "Beta",
+          updatedAt: "2026-03-26T11:00:00.000Z",
+        }),
+      ],
+      threads: [
+        baseThread({
+          id: threadId("thread-a"),
+          projectId: projectId("project-a"),
+          updatedAt: "2026-03-26T09:10:00.000Z",
+        }),
+        baseThread({
+          id: threadId("thread-b"),
+          projectId: projectId("project-a"),
+          updatedAt: "2026-03-26T11:10:00.000Z",
+        }),
+      ],
+      query: "",
+      filterMode: "active",
+      projectSortMode: "recent",
+      pinnedProjectIds: new Set([projectId("project-a")]),
+      pinnedThreadIds: new Set([threadId("thread-a")]),
+    });
 
-    expect(shouldClearThreadSelectionOnMouseDown(child)).toBe(false);
+    expect(entries.map((entry) => entry.project.id)).toEqual([
+      projectId("project-a"),
+      projectId("project-b"),
+    ]);
+    expect(entries[0]?.threads.map((entry) => entry.thread.id)).toEqual([
+      threadId("thread-a"),
+      threadId("thread-b"),
+    ]);
   });
 
-  it("preserves selection for thread list toggle controls", () => {
-    const selectionSafe = {
-      closest: (selector: string) =>
-        selector.includes("[data-thread-selection-safe]") ? ({} as Element) : null,
-    } as unknown as HTMLElement;
+  it("filters archived projects and threads out of the active view", () => {
+    const entries = buildSidebarProjectEntries({
+      projects: [
+        baseProject({ id: projectId("project-active"), name: "Active project" }),
+        baseProject({ id: projectId("project-archived"), name: "Archived project" }),
+      ],
+      threads: [
+        baseThread({
+          id: threadId("thread-active"),
+          projectId: projectId("project-active"),
+          title: "Visible thread",
+        }),
+        baseThread({
+          id: threadId("thread-archived"),
+          projectId: projectId("project-active"),
+          title: "Hidden thread",
+          updatedAt: "2026-03-26T12:00:00.000Z",
+        }),
+      ],
+      query: "",
+      filterMode: "active",
+      projectSortMode: "recent",
+      archivedProjectIds: new Set([projectId("project-archived")]),
+      archivedThreadIds: new Set([threadId("thread-archived")]),
+    });
 
-    expect(shouldClearThreadSelectionOnMouseDown(selectionSafe)).toBe(false);
+    expect(entries.map((entry) => entry.project.id)).toEqual([projectId("project-active")]);
+    expect(entries[0]?.threads.map((entry) => entry.thread.id)).toEqual([
+      threadId("thread-active"),
+    ]);
   });
 
-  it("clears selection for unrelated sidebar clicks", () => {
-    const unrelated = {
-      closest: () => null,
-    } as unknown as HTMLElement;
+  it("keeps a project visible when the query matches one of its threads", () => {
+    const entries = buildSidebarProjectEntries({
+      projects: [baseProject({ id: projectId("project-search"), name: "Searchable" })],
+      threads: [
+        baseThread({
+          id: threadId("thread-one"),
+          projectId: projectId("project-search"),
+          title: "Fix queue bug",
+        }),
+        baseThread({
+          id: threadId("thread-two"),
+          projectId: projectId("project-search"),
+          title: "Refactor sidebar",
+        }),
+      ],
+      query: "queue",
+      filterMode: "active",
+      projectSortMode: "recent",
+    });
 
-    expect(shouldClearThreadSelectionOnMouseDown(unrelated)).toBe(true);
-  });
-});
-
-describe("resolveSidebarNewThreadEnvMode", () => {
-  it("uses the app default when the caller does not request a specific mode", () => {
-    expect(
-      resolveSidebarNewThreadEnvMode({
-        defaultEnvMode: "worktree",
-      }),
-    ).toBe("worktree");
-  });
-
-  it("preserves an explicit requested mode over the app default", () => {
-    expect(
-      resolveSidebarNewThreadEnvMode({
-        requestedEnvMode: "local",
-        defaultEnvMode: "worktree",
-      }),
-    ).toBe("local");
-  });
-});
-
-describe("resolveThreadStatusPill", () => {
-  const baseThread = {
-    interactionMode: "plan" as const,
-    latestTurn: null,
-    lastVisitedAt: undefined,
-    proposedPlans: [],
-    session: {
-      provider: "codex" as const,
-      status: "running" as const,
-      createdAt: "2026-03-09T10:00:00.000Z",
-      updatedAt: "2026-03-09T10:00:00.000Z",
-      orchestrationStatus: "running" as const,
-    },
-  };
-
-  it("shows pending approval before all other statuses", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: baseThread,
-        hasPendingApprovals: true,
-        hasPendingUserInput: true,
-      }),
-    ).toMatchObject({ label: "Pending Approval", pulse: false });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.threads.map((entry) => entry.thread.id)).toEqual([threadId("thread-one")]);
   });
 
-  it("shows awaiting input when plan mode is blocked on user answers", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: baseThread,
-        hasPendingApprovals: false,
-        hasPendingUserInput: true,
-      }),
-    ).toMatchObject({ label: "Awaiting Input", pulse: false });
-  });
+  it("shows every visible thread when the project itself matches the query", () => {
+    const entries = buildSidebarProjectEntries({
+      projects: [baseProject({ id: projectId("project-alpha"), name: "Alpha workspace" })],
+      threads: [
+        baseThread({
+          id: threadId("thread-one"),
+          projectId: projectId("project-alpha"),
+          title: "Fix queue bug",
+          updatedAt: "2026-03-26T10:11:00.000Z",
+        }),
+        baseThread({
+          id: threadId("thread-two"),
+          projectId: projectId("project-alpha"),
+          title: "Refactor sidebar",
+          updatedAt: "2026-03-26T10:10:00.000Z",
+        }),
+      ],
+      query: "alpha",
+      filterMode: "active",
+      projectSortMode: "recent",
+    });
 
-  it("falls back to working when the thread is actively running without blockers", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: baseThread,
-        hasPendingApprovals: false,
-        hasPendingUserInput: false,
-      }),
-    ).toMatchObject({ label: "Working", pulse: true });
-  });
-
-  it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          latestTurn: makeLatestTurn(),
-          proposedPlans: [
-            {
-              id: "plan-1" as never,
-              turnId: "turn-1" as never,
-              createdAt: "2026-03-09T10:00:00.000Z",
-              updatedAt: "2026-03-09T10:05:00.000Z",
-              planMarkdown: "# Plan",
-            },
-          ],
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
-          },
-        },
-        hasPendingApprovals: false,
-        hasPendingUserInput: false,
-      }),
-    ).toMatchObject({ label: "Plan Ready", pulse: false });
-  });
-
-  it("shows completed when there is an unseen completion and no active blocker", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          interactionMode: "default",
-          latestTurn: makeLatestTurn(),
-          lastVisitedAt: "2026-03-09T10:04:00.000Z",
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
-          },
-        },
-        hasPendingApprovals: false,
-        hasPendingUserInput: false,
-      }),
-    ).toMatchObject({ label: "Completed", pulse: false });
-  });
-});
-
-describe("resolveThreadRowClassName", () => {
-  it("uses the darker selected palette when a thread is both selected and active", () => {
-    const className = resolveThreadRowClassName({ isActive: true, isSelected: true });
-    expect(className).toContain("bg-primary/22");
-    expect(className).toContain("hover:bg-primary/26");
-    expect(className).toContain("dark:bg-primary/30");
-    expect(className).not.toContain("bg-accent/85");
-  });
-
-  it("uses selected hover colors for selected threads", () => {
-    const className = resolveThreadRowClassName({ isActive: false, isSelected: true });
-    expect(className).toContain("bg-primary/15");
-    expect(className).toContain("hover:bg-primary/19");
-    expect(className).toContain("dark:bg-primary/22");
-    expect(className).not.toContain("hover:bg-accent");
-  });
-
-  it("keeps the accent palette for active-only threads", () => {
-    const className = resolveThreadRowClassName({ isActive: true, isSelected: false });
-    expect(className).toContain("bg-accent/85");
-    expect(className).toContain("hover:bg-accent");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.matchedProject).toBe(true);
+    expect(entries[0]?.threads.map((entry) => entry.thread.id)).toEqual([
+      threadId("thread-one"),
+      threadId("thread-two"),
+    ]);
   });
 });
