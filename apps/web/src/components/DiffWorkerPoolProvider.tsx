@@ -4,6 +4,32 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 
+/**
+ * Catch the fire-and-forget `initialize()` promise on the worker pool singleton.
+ *
+ * `@pierre/diffs` calls `workerPoolManager.initialize()` inside
+ * `getOrCreateWorkerPoolSingleton` without attaching a `.catch()`. When the
+ * React tree unmounts quickly (e.g. browser-test teardown), the pool is
+ * terminated while init is still in flight, which causes an unhandled
+ * rejection ("WorkerPoolManager: workers failed to initialize"). Attaching a
+ * no-op catch here prevents that from surfacing as a test/runtime error.
+ */
+function DiffWorkerPoolInitGuard() {
+  const workerPool = useWorkerPool();
+
+  useEffect(() => {
+    if (!workerPool) return;
+    // `initialized` is `false | Promise<void> | true` on WorkerPoolManager.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessing internal library field
+    const pending = (workerPool as unknown as Record<string, unknown>).initialized;
+    if (pending && typeof (pending as Promise<void>).catch === "function") {
+      (pending as Promise<void>).catch(() => undefined);
+    }
+  }, [workerPool]);
+
+  return null;
+}
+
 function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName }) {
   const workerPool = useWorkerPool();
 
@@ -49,6 +75,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
         tokenizeMaxLineLength: 1_000,
       }}
     >
+      <DiffWorkerPoolInitGuard />
       <DiffWorkerThemeSync themeName={diffThemeName} />
       {children}
     </WorkerPoolContextProvider>
