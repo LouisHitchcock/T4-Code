@@ -12,7 +12,7 @@ import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
-  CheckIcon,
+  CheckCircle2Icon,
   CircleAlertIcon,
   EyeIcon,
   GitPullRequestIcon,
@@ -342,39 +342,53 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             isLiveGroup && row.createdAt ? formatWorkingTimer(row.createdAt, nowIso) : null;
           const groupSummary = isLiveGroup
             ? liveDuration
-              ? `Live for ${liveDuration}`
-              : "Live now"
+              ? `Active for ${liveDuration}`
+              : "Running"
             : onlyToolEntries
-              ? `${groupedEntries.length} recent call${groupedEntries.length === 1 ? "" : "s"}`
-              : `${groupedEntries.length} recent event${groupedEntries.length === 1 ? "" : "s"}`;
+              ? `${groupedEntries.length} call${groupedEntries.length === 1 ? "" : "s"} completed`
+              : `${groupedEntries.length} event${groupedEntries.length === 1 ? "" : "s"} completed`;
 
           return (
             <div
               data-work-group-live={isLiveGroup || undefined}
               className={cn(
-                "relative overflow-hidden rounded-[24px] border px-2.5 py-2 shadow-[0_18px_50px_-36px_--alpha(var(--color-black)/24%)]",
+                "relative overflow-hidden rounded-[24px] border px-2.5 py-2 transition-[border-color,background-color,box-shadow] duration-500 ease-out",
                 isLiveGroup
-                  ? "border-border/65 bg-[linear-gradient(180deg,--alpha(var(--color-white)/5%),--alpha(var(--color-white)/2%)_48%,--alpha(var(--color-black)/0%)_100%)]"
-                  : "border-border/45 bg-card/25",
+                  ? "border-border/65 bg-[linear-gradient(180deg,--alpha(var(--color-white)/5%),--alpha(var(--color-white)/2%)_48%,--alpha(var(--color-black)/0%)_100%)] shadow-[0_18px_50px_-36px_--alpha(var(--color-black)/24%)]"
+                  : "border-border/40 bg-card/20 shadow-[0_8px_24px_-20px_--alpha(var(--color-black)/12%)]",
               )}
             >
+              {/* Live progress bar */}
+              {isLiveGroup && (
+                <div className="absolute inset-x-0 top-0 h-[2px] overflow-hidden">
+                  <div className="app-tool-group-progress h-full w-full bg-gradient-to-r from-transparent via-foreground/20 to-transparent" />
+                </div>
+              )}
+
               <div className="mb-2 flex items-start justify-between gap-3 px-0.5">
                 <div className="min-w-0 flex items-center gap-2.5">
-                  <ToolCallActivityBadge isLive={isLiveGroup} />
+                  <ToolCallActivityBadge isLive={isLiveGroup} entryCount={groupedEntries.length} />
                   <div className="min-w-0">
                     <p className="truncate text-[11px] font-medium text-foreground/88">
                       {groupLabel}
                     </p>
-                    <p className="truncate text-[10px] text-muted-foreground/58">{groupSummary}</p>
+                    <p
+                      className={cn(
+                        "truncate text-[10px] transition-colors duration-300",
+                        isLiveGroup ? "text-muted-foreground/65" : "text-muted-foreground/50",
+                      )}
+                    >
+                      {groupSummary}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
-                      "rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em]",
+                      "rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] transition-[border-color,background-color,color] duration-300",
                       isLiveGroup
                         ? "border-border/60 bg-background/75 text-foreground/78"
-                        : "border-border/55 bg-background/55 text-muted-foreground/60",
+                        : "border-border/50 bg-background/50 text-muted-foreground/55",
                     )}
                   >
                     {isLiveGroup ? "Live" : groupedEntries.length}
@@ -382,7 +396,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   {hasOverflow && (
                     <button
                       type="button"
-                      className="app-fade-motion text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 hover:text-foreground/75"
+                      className="app-fade-motion text-[9px] uppercase tracking-[0.12em] text-muted-foreground/50 hover:text-foreground/75"
                       onClick={() => onToggleWorkGroup(groupId)}
                     >
                       {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
@@ -615,11 +629,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/35 px-3 py-1.5 text-[11px] text-muted-foreground/72 shadow-[0_14px_38px_-30px_--alpha(var(--color-black)/24%)]">
-            <span className="inline-flex items-center gap-[4px]">
-              <span className="app-tool-live-dot h-1.5 w-1.5 rounded-full bg-foreground/75" />
-              <span className="app-tool-live-dot h-1.5 w-1.5 rounded-full bg-foreground/55 [animation-delay:140ms]" />
-              <span className="app-tool-live-dot h-1.5 w-1.5 rounded-full bg-foreground/35 [animation-delay:280ms]" />
+          <div className="inline-flex items-center gap-2.5 rounded-full border border-border/60 bg-card/35 px-3.5 py-2 text-[11px] text-muted-foreground/72 shadow-[0_14px_38px_-30px_--alpha(var(--color-black)/24%)]">
+            <span className="inline-flex items-center gap-[5px]">
+              <span className="app-tool-live-dot h-[5px] w-[5px] rounded-full bg-foreground/75" />
+              <span className="app-tool-live-dot h-[5px] w-[5px] rounded-full bg-foreground/55 [animation-delay:160ms]" />
+              <span className="app-tool-live-dot h-[5px] w-[5px] rounded-full bg-foreground/35 [animation-delay:320ms]" />
             </span>
             <span>
               {row.createdAt
@@ -723,19 +737,19 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   if (tone === "error") {
     return {
       icon: CircleAlertIcon,
-      className: "text-foreground/92",
+      className: "text-rose-400",
     };
   }
   if (tone === "thinking") {
     return {
       icon: BotIcon,
-      className: "text-foreground/92",
+      className: "text-foreground/88",
     };
   }
   if (tone === "info") {
     return {
-      icon: CheckIcon,
-      className: "text-foreground/92",
+      icon: CheckCircle2Icon,
+      className: "text-foreground/82",
     };
   }
   return {
@@ -807,26 +821,26 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
 function workEntryContainerClass(visualState: "active" | "recent" | "settled" | "error"): string {
   switch (visualState) {
     case "active":
-      return "app-tool-entry-live border-border/70 bg-card/55 shadow-[0_20px_52px_-34px_--alpha(var(--color-black)/38%)]";
+      return "app-tool-entry-live app-tool-active-glow border-border/70 bg-card/55";
     case "recent":
-      return "border-border/55 bg-card/38 shadow-[0_14px_34px_-30px_--alpha(var(--color-black)/20%)]";
+      return "border-border/50 bg-card/35 shadow-[0_10px_28px_-24px_--alpha(var(--color-black)/16%)]";
     case "error":
-      return "border-rose-400/24 bg-rose-500/[0.08] shadow-[0_18px_42px_-32px_--alpha(var(--color-red-500)/45%)]";
+      return "border-rose-400/28 bg-rose-500/[0.08] shadow-[0_14px_34px_-28px_--alpha(var(--color-red-500)/35%)]";
     default:
-      return "border-transparent bg-background/22 opacity-[0.84]";
+      return "border-transparent bg-background/18 opacity-[0.82]";
   }
 }
 
 function workEntryBadgeClass(visualState: "active" | "recent" | "settled" | "error"): string {
   switch (visualState) {
     case "active":
-      return "border-border/65 bg-background/80 text-foreground shadow-[0_12px_28px_-20px_--alpha(var(--color-black)/32%)]";
+      return "border-border/65 bg-background/80 text-foreground shadow-[0_8px_20px_-14px_--alpha(var(--color-black)/28%)]";
     case "recent":
-      return "border-border/60 bg-background/78 text-foreground/88";
+      return "border-border/55 bg-background/72 text-foreground/85";
     case "error":
-      return "border-rose-400/20 bg-rose-500/[0.12] text-rose-200";
+      return "border-rose-400/22 bg-rose-500/[0.12] text-rose-300";
     default:
-      return "border-border/45 bg-background/55 text-muted-foreground/78";
+      return "border-border/40 bg-background/50 text-muted-foreground/72";
   }
 }
 
@@ -840,25 +854,29 @@ function workEntryPreviewClass(
   return "text-muted-foreground/58";
 }
 
-const ToolCallActivityBadge = memo(function ToolCallActivityBadge(props: { isLive: boolean }) {
+const ToolCallActivityBadge = memo(function ToolCallActivityBadge(props: {
+  isLive: boolean;
+  entryCount: number;
+}) {
   return (
     <span className="flex -space-x-1">
       {[0, 1, 2].map((index) => (
         <span
           key={`tool-call-badge:${index}`}
           className={cn(
-            "relative flex size-5 items-center justify-center rounded-full border backdrop-blur-sm",
+            "app-tool-badge-pop relative flex size-5 items-center justify-center rounded-full border backdrop-blur-sm transition-[border-color,background-color,box-shadow] duration-300",
             props.isLive
-              ? "border-border/65 bg-background/78 shadow-[0_10px_24px_-18px_--alpha(var(--color-black)/30%)]"
-              : "border-border/60 bg-background/85",
+              ? "border-border/65 bg-background/78 shadow-[0_8px_18px_-14px_--alpha(var(--color-black)/28%)]"
+              : "border-border/55 bg-background/80",
           )}
+          style={{ animationDelay: `${index * 60}ms` }}
         >
           <span
             className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              props.isLive ? "app-tool-live-dot bg-foreground/78" : "bg-muted-foreground/40",
+              "h-1.5 w-1.5 rounded-full transition-[background-color,opacity] duration-300",
+              props.isLive ? "app-tool-live-dot bg-foreground/78" : "bg-muted-foreground/35",
             )}
-            style={props.isLive ? { animationDelay: `${index * 140}ms` } : undefined}
+            style={props.isLive ? { animationDelay: `${index * 160}ms` } : undefined}
           />
         </span>
       ))}
@@ -893,15 +911,16 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     <div
       data-work-entry-visual-state={visualState}
       className={cn(
-        "app-tool-entry-motion relative overflow-hidden rounded-2xl border px-3 py-2.5 transition-[transform,opacity,border-color,background-color,box-shadow] duration-300 ease-out motion-safe:hover:-translate-y-px",
+        "app-tool-entry-motion group/entry relative overflow-hidden rounded-2xl border px-3 py-2.5 transition-[transform,opacity,border-color,background-color,box-shadow] duration-[350ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "motion-safe:hover:-translate-y-px motion-safe:hover:shadow-[0_16px_40px_-28px_--alpha(var(--color-black)/28%)]",
         workEntryContainerClass(visualState),
       )}
-      style={{ animationDelay: `${Math.min(entryIndex, 5) * 85}ms` }}
+      style={{ animationDelay: `${Math.min(entryIndex, 5) * 70}ms` }}
     >
       <div className="relative z-10 flex items-start gap-3">
         <span
           className={cn(
-            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-2xl border",
+            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-2xl border transition-[border-color,background-color,box-shadow,color] duration-300",
             workEntryBadgeClass(visualState),
             iconConfig.className,
           )}
@@ -913,7 +932,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             <div className="min-w-0">
               <p
                 className={cn(
-                  "truncate text-[11px] font-medium leading-5",
+                  "truncate text-[11px] font-medium leading-5 transition-colors duration-200",
                   workToneClass(workEntry.tone),
                 )}
                 title={displayText}
@@ -923,7 +942,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               {preview && (
                 <p
                   className={cn(
-                    "mt-0.5 line-clamp-2 text-[10px] leading-4 break-words",
+                    "mt-0.5 line-clamp-2 text-[10px] leading-4 break-words transition-colors duration-200",
                     workEntryPreviewClass(visualState, workEntry.tone),
                   )}
                   title={preview}
@@ -933,10 +952,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               )}
             </div>
             {visualState === "active" && (
-              <span className="flex shrink-0 items-center gap-[4px] rounded-full border border-border/60 bg-background/72 px-2 py-1">
-                <span className="app-tool-live-dot h-1.5 w-1.5 rounded-full bg-foreground/78" />
-                <span className="app-tool-live-dot h-1.5 w-1.5 rounded-full bg-foreground/58 [animation-delay:140ms]" />
-                <span className="app-tool-live-dot h-1.5 w-1.5 rounded-full bg-foreground/36 [animation-delay:280ms]" />
+              <span className="flex shrink-0 items-center gap-[5px] rounded-full border border-border/60 bg-background/72 px-2 py-1">
+                <span className="app-tool-live-dot h-[5px] w-[5px] rounded-full bg-foreground/78" />
+                <span className="app-tool-live-dot h-[5px] w-[5px] rounded-full bg-foreground/58 [animation-delay:160ms]" />
+                <span className="app-tool-live-dot h-[5px] w-[5px] rounded-full bg-foreground/36 [animation-delay:320ms]" />
               </span>
             )}
           </div>
@@ -948,10 +967,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             <span
               key={`${workEntry.id}:${filePath}`}
               className={cn(
-                "rounded-full border px-2 py-0.5 font-mono text-[10px]",
+                "rounded-full border px-2 py-0.5 font-mono text-[10px] transition-[border-color,background-color,color] duration-200",
+                "group-hover/entry:border-border/65 group-hover/entry:bg-background/80",
                 visualState === "active"
                   ? "border-border/55 bg-background/72 text-muted-foreground/82"
-                  : "border-border/55 bg-background/75 text-muted-foreground/75",
+                  : "border-border/45 bg-background/60 text-muted-foreground/68",
               )}
               title={filePath}
             >
@@ -959,7 +979,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </span>
           ))}
           {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
+            <span className="px-1 text-[10px] text-muted-foreground/50">
               +{(workEntry.changedFiles?.length ?? 0) - 4}
             </span>
           )}

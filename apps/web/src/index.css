@@ -81,45 +81,129 @@
   }
 
   @keyframes tool-entry-rise {
-    from {
+    0% {
       opacity: 0;
-      transform: translateY(10px) scale(0.985);
+      transform: translateY(14px) scale(0.97);
+      filter: blur(2px);
     }
 
-    to {
+    60% {
+      opacity: 1;
+      filter: blur(0);
+    }
+
+    80% {
+      transform: translateY(-1px) scale(1.003);
+    }
+
+    100% {
       opacity: 1;
       transform: translateY(0) scale(1);
+      filter: blur(0);
     }
   }
 
   @keyframes tool-entry-sheen {
-    from {
+    0% {
       transform: translate3d(-125%, 0, 0);
+      opacity: 0;
     }
 
-    to {
+    10% {
+      opacity: 1;
+    }
+
+    90% {
+      opacity: 1;
+    }
+
+    100% {
       transform: translate3d(135%, 0, 0);
+      opacity: 0;
     }
   }
 
   @keyframes tool-live-dot {
     0%,
     100% {
-      opacity: 0.35;
-      transform: scale(0.78);
+      opacity: 0.25;
+      transform: scale(0.72);
     }
 
     50% {
       opacity: 1;
+      transform: scale(1.05);
+    }
+  }
+
+  @keyframes tool-active-glow {
+    0%,
+    100% {
+      box-shadow:
+        0 0 0 0 transparent,
+        0 20px 52px -34px --alpha(var(--color-black) / 38%);
+    }
+
+    50% {
+      box-shadow:
+        0 0 18px -4px --alpha(var(--color-foreground) / 6%),
+        0 20px 52px -34px --alpha(var(--color-black) / 38%);
+    }
+  }
+
+  @keyframes tool-group-progress {
+    0% {
+      transform: scaleX(0);
+      opacity: 0;
+    }
+
+    15% {
+      opacity: 1;
+    }
+
+    100% {
+      transform: scaleX(1);
+      opacity: 0;
+    }
+  }
+
+  @keyframes tool-badge-pop {
+    0% {
+      transform: scale(0.6);
+      opacity: 0;
+    }
+
+    50% {
+      transform: scale(1.08);
+    }
+
+    100% {
       transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes tool-settle-fade {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    to {
+      opacity: 0.84;
+      transform: scale(0.998);
     }
   }
 
   @keyframes assistant-response-reveal {
     from {
       opacity: 0;
-      transform: translateY(10px);
+      transform: translateY(12px);
       filter: blur(4px);
+    }
+
+    60% {
+      filter: blur(0);
     }
 
     to {
@@ -193,7 +277,7 @@
   }
 
   .app-tool-entry-motion {
-    animation: tool-entry-rise 360ms var(--motion-ease-emphasized) both;
+    animation: tool-entry-rise 420ms var(--motion-ease-emphasized) both;
   }
 
   .app-tool-entry-live {
@@ -206,24 +290,39 @@
     inset: 0;
     pointer-events: none;
     background: linear-gradient(
-      100deg,
+      104deg,
       transparent 18%,
-      rgb(255 255 255 / 0%) 34%,
-      rgb(255 255 255 / 10%) 50%,
-      rgb(255 255 255 / 0%) 66%,
+      rgb(255 255 255 / 0%) 32%,
+      rgb(255 255 255 / 8%) 48%,
+      rgb(255 255 255 / 12%) 52%,
+      rgb(255 255 255 / 0%) 68%,
       transparent 82%
     );
     transform: translate3d(-125%, 0, 0);
-    animation: tool-entry-sheen 2600ms linear infinite;
+    animation: tool-entry-sheen 2800ms linear infinite;
     mix-blend-mode: screen;
+    border-radius: inherit;
   }
 
   .app-tool-live-dot {
     animation: tool-live-dot 1400ms var(--motion-ease-standard) infinite;
   }
 
+  .app-tool-active-glow {
+    animation: tool-active-glow 2800ms var(--motion-ease-standard) infinite;
+  }
+
+  .app-tool-badge-pop {
+    animation: tool-badge-pop 340ms var(--motion-ease-emphasized) both;
+  }
+
+  .app-tool-group-progress {
+    animation: tool-group-progress 2200ms var(--motion-ease-standard) infinite;
+    transform-origin: left;
+  }
+
   .app-assistant-response-motion {
-    animation: assistant-response-reveal 340ms var(--motion-ease-emphasized) both;
+    animation: assistant-response-reveal 380ms var(--motion-ease-emphasized) both;
   }
 }
 
@@ -239,6 +338,9 @@
   .app-tool-entry-motion,
   .app-tool-entry-live::after,
   .app-tool-live-dot,
+  .app-tool-active-glow,
+  .app-tool-badge-pop,
+  .app-tool-group-progress,
   .app-assistant-response-motion {
     transition-duration: 0ms !important;
     animation-duration: 0ms !important;
