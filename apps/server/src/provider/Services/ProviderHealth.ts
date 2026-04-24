@@ -18,5 +18,5 @@ export interface ProviderHealthShape {
 }
 
 export class ProviderHealth extends ServiceMap.Service<ProviderHealth, ProviderHealthShape>()(
-  "cut3/provider/Services/ProviderHealth",
+  "t4code/provider/Services/ProviderHealth",
 ) {}

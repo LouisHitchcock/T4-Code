@@ -8,5 +8,5 @@ export interface KimiAdapterShape extends ProviderAdapterShape<ProviderAdapterEr
 }
 
 export class KimiAdapter extends ServiceMap.Service<KimiAdapter, KimiAdapterShape>()(
-  "cut3/provider/Services/KimiAdapter",
+  "t4code/provider/Services/KimiAdapter",
 ) {}

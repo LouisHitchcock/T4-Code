@@ -25,7 +25,46 @@ interface ThreadTerminalState {
   activeTerminalGroupId: string;
 }
 
-const TERMINAL_STATE_STORAGE_KEY = "cut3:terminal-state:v1";
+const LEGACY_TERMINAL_STATE_STORAGE_KEY = "cut3:terminal-state:v1";
+const NEXT_TERMINAL_STATE_STORAGE_KEY = "t4code:terminal-state:v1";
+
+function createTerminalStateStorage() {
+  if (typeof localStorage === "undefined") {
+    return {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+  }
+
+  return {
+    getItem: (name: string) => {
+      const current = localStorage.getItem(name);
+      if (current !== null) {
+        return current;
+      }
+      const legacy = localStorage.getItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+      if (legacy === null) {
+        return null;
+      }
+      try {
+        localStorage.setItem(name, legacy);
+        localStorage.removeItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+      } catch {
+        // Best-effort migration only.
+      }
+      return legacy;
+    },
+    setItem: (name: string, value: string) => {
+      localStorage.setItem(name, value);
+      localStorage.removeItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+    },
+    removeItem: (name: string) => {
+      localStorage.removeItem(name);
+      localStorage.removeItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+    },
+  };
+}
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -540,9 +579,9 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
       };
     },
     {
-      name: TERMINAL_STATE_STORAGE_KEY,
+      name: NEXT_TERMINAL_STATE_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(createTerminalStateStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
       }),

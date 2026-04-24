@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { filterArchivedIds, type SidebarProjectSortMode } from "./lib/threadOrdering";
 
-const SIDEBAR_PREFERENCES_STORAGE_KEY = "cut3:sidebar-preferences:v1";
+const SIDEBAR_PREFERENCES_STORAGE_KEY = "t4code:sidebar-preferences:v1";
+const LEGACY_SIDEBAR_PREFERENCES_STORAGE_KEY = "cut3:sidebar-preferences:v1";
 
 interface PersistedSidebarPreferencesState {
   pinnedProjectIds: ProjectId[];
@@ -117,7 +118,33 @@ export const useSidebarPreferencesStore = create<SidebarPreferencesState>()(
     }),
     {
       name: SIDEBAR_PREFERENCES_STORAGE_KEY,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => ({
+        getItem: (name) => {
+          const current = localStorage.getItem(name);
+          if (current !== null) {
+            return current;
+          }
+          const legacy = localStorage.getItem(LEGACY_SIDEBAR_PREFERENCES_STORAGE_KEY);
+          if (legacy === null) {
+            return null;
+          }
+          try {
+            localStorage.setItem(name, legacy);
+            localStorage.removeItem(LEGACY_SIDEBAR_PREFERENCES_STORAGE_KEY);
+          } catch {
+            // Best-effort migration only.
+          }
+          return legacy;
+        },
+        setItem: (name, value) => {
+          localStorage.setItem(name, value);
+          localStorage.removeItem(LEGACY_SIDEBAR_PREFERENCES_STORAGE_KEY);
+        },
+        removeItem: (name) => {
+          localStorage.removeItem(name);
+          localStorage.removeItem(LEGACY_SIDEBAR_PREFERENCES_STORAGE_KEY);
+        },
+      })),
       partialize: (state): PersistedSidebarPreferencesState => ({
         pinnedProjectIds: [...state.pinnedProjectIds],
         archivedProjectIds: [...state.archivedProjectIds],

@@ -38,6 +38,8 @@ import type {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
+  TerminalExecEvent,
+  TerminalExecResult,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalSessionSnapshot,
@@ -57,6 +59,7 @@ import { clearTransientTurnStartProviderOptions } from "./provider/transientProv
 import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
+import { buildBangCommandTerminalId } from "@t3tools/shared/terminalRun";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -2109,6 +2112,205 @@ describe("WebSocket Server", () => {
     );
     expect(push.type).toBe("push");
     expect(push.channel).toBe(WS_CHANNELS.terminalEvent);
+  });
+
+  it("routes terminal.exec and publishes terminal exec lifecycle events", async () => {
+    const cwd = makeTempDir("cut3-ws-terminal-exec-cwd-");
+    server = await createTestServer({ cwd });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.terminalExec, {
+      threadId: "thread-1",
+      terminalId: DEFAULT_TERMINAL_ID,
+      cwd,
+      mode: "wait",
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('hello from exec\\n');"],
+      isReadOnly: true,
+      reason: "ws terminal exec test",
+    });
+    expect(response.error).toBeUndefined();
+    const result = response.result as TerminalExecResult;
+    expect(result.mode).toBe("wait");
+    if (result.mode !== "wait") return;
+    expect(result.status).toBe("succeeded");
+    expect(result.stdout).toContain("hello from exec");
+
+    const startedPush = await waitForPush(
+      ws,
+      WS_CHANNELS.terminalExecEvent,
+      (push) =>
+        (push.data as TerminalExecEvent).type === "exec.started" &&
+        (push.data as TerminalExecEvent).commandId === result.commandId,
+    );
+    expect(startedPush.type).toBe("push");
+    expect(startedPush.channel).toBe(WS_CHANNELS.terminalExecEvent);
+
+    const completedPush = await waitForPush(
+      ws,
+      WS_CHANNELS.terminalExecEvent,
+      (push) =>
+        (push.data as TerminalExecEvent).type === "exec.completed" &&
+        (push.data as TerminalExecEvent).commandId === result.commandId,
+    );
+    expect(completedPush.type).toBe("push");
+    expect(completedPush.channel).toBe(WS_CHANNELS.terminalExecEvent);
+  });
+
+  it("mirrors tracked ! terminal runs into thread activity events", async () => {
+    const cwd = makeTempDir("cut3-ws-terminal-activity-cwd-");
+    const terminalManager = new MockTerminalManager();
+    server = await createTestServer({
+      cwd,
+      terminalManager,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-terminal-activity-project-create",
+      projectId: "project-terminal-activity",
+      title: "Terminal Activity Project",
+      workspaceRoot: cwd,
+      defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-terminal-activity-thread-create",
+      threadId: "thread-1",
+      projectId: "project-terminal-activity",
+      title: "Terminal Activity Thread",
+      model: DEFAULT_MODEL_BY_PROVIDER.codex,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+    let threadReady = false;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+      expect(snapshotResponse.error).toBeUndefined();
+      const snapshot = snapshotResponse.result as { threads?: Array<{ id?: string }> } | undefined;
+      if (snapshot?.threads?.some((thread) => thread.id === "thread-1")) {
+        threadReady = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(threadReady).toBe(true);
+
+    const terminalId = buildBangCommandTerminalId("test-run");
+    const open = await sendRequest(ws, WS_METHODS.terminalOpen, {
+      threadId: "thread-1",
+      terminalId,
+      cwd,
+      cols: 100,
+      rows: 24,
+      command: "powershell.exe",
+      args: ["-NoLogo", "-NoProfile", "-Command", "echo hello from bang"],
+    });
+    expect(open.error).toBeUndefined();
+
+    const startedPush = await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (push) => {
+      const event = push.data as {
+        type?: string;
+        activity?: { kind?: string; payload?: { data?: { item?: { command?: string } } } };
+        payload?: { activity?: { kind?: string; payload?: { data?: { item?: { command?: string } } } } };
+      };
+      const activity = event.activity ?? event.payload?.activity;
+      return (
+        event.type === "thread.activity-appended" &&
+        activity?.kind === "terminal.command.started"
+      );
+    });
+    const startedEvent = startedPush.data as {
+      activity?: {
+        kind?: string;
+        summary?: string;
+        payload?: {
+          itemType?: string;
+          data?: { item?: { command?: string } };
+        };
+      };
+      payload?: {
+        activity?: {
+          kind?: string;
+          summary?: string;
+          payload?: {
+            itemType?: string;
+            data?: { item?: { command?: string } };
+          };
+        };
+      };
+    };
+    const startedActivity = startedEvent.activity ?? startedEvent.payload?.activity;
+    expect(startedActivity).toMatchObject({
+      kind: "terminal.command.started",
+      summary: "Running command",
+      payload: {
+        itemType: "command_execution",
+        data: {
+          item: {
+            command: "echo hello from bang",
+          },
+        },
+      },
+    });
+
+    terminalManager.emitEvent({
+      type: "output",
+      threadId: "thread-1",
+      terminalId,
+      createdAt: new Date().toISOString(),
+      data: "hello from bang\n",
+    });
+    terminalManager.emitEvent({
+      type: "exited",
+      threadId: "thread-1",
+      terminalId,
+      createdAt: new Date().toISOString(),
+      exitCode: 0,
+      exitSignal: null,
+    });
+
+    const completedPush = await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (push) => {
+      const event = push.data as {
+        type?: string;
+        activity?: { kind?: string; payload?: { detail?: string } };
+        payload?: { activity?: { kind?: string; payload?: { detail?: string } } };
+      };
+      const activity = event.activity ?? event.payload?.activity;
+      return (
+        event.type === "thread.activity-appended" &&
+        activity?.kind === "terminal.command.completed"
+      );
+    });
+    const completedEvent = completedPush.data as {
+      activity?: { kind?: string; summary?: string; payload?: { detail?: string } };
+      payload?: { activity?: { kind?: string; summary?: string; payload?: { detail?: string } } };
+    };
+    const completedActivity = completedEvent.activity ?? completedEvent.payload?.activity;
+    expect(completedActivity).toMatchObject({
+      kind: "terminal.command.completed",
+      summary: "Command completed",
+      payload: {
+        detail: "hello from bang\n",
+      },
+    });
   });
 
   it("detaches terminal event listener on stop for injected manager", async () => {

@@ -30,6 +30,7 @@ import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
+import { TerminalCommandRunnerLive } from "./terminal/Layers/CommandRunner";
 
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { KeybindingsLive } from "./keybindings";
@@ -42,10 +43,16 @@ import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 
-const ENABLE_PROVIDER_EVENT_LOGS_ENV = "CUT3_ENABLE_PROVIDER_EVENT_LOGS";
+const ENABLE_PROVIDER_EVENT_LOGS_ENV = "T4CODE_ENABLE_PROVIDER_EVENT_LOGS";
+const LEGACY_ENABLE_PROVIDER_EVENT_LOGS_ENV = "CUT3_ENABLE_PROVIDER_EVENT_LOGS";
 
 function shouldEnableProviderEventLogs(): boolean {
-  const raw = process.env[ENABLE_PROVIDER_EVENT_LOGS_ENV]?.trim().toLowerCase();
+  const raw = (
+    process.env[ENABLE_PROVIDER_EVENT_LOGS_ENV] ??
+    process.env[LEGACY_ENABLE_PROVIDER_EVENT_LOGS_ENV]
+  )
+    ?.trim()
+    .toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes";
 }
 
@@ -138,13 +145,14 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(checkpointReactorLayer),
   );
 
-  const terminalLayer = TerminalManagerLive.pipe(
+  const terminalManagerLayer = TerminalManagerLive.pipe(
     Layer.provide(
       typeof Bun !== "undefined" && process.platform !== "win32"
         ? BunPtyAdapterLive
         : NodePtyAdapterLive,
     ),
   );
+  const terminalLayer = TerminalCommandRunnerLive.pipe(Layer.provideMerge(terminalManagerLayer));
 
   const gitManagerLayer = GitManagerLive.pipe(
     Layer.provideMerge(gitCoreLayer),

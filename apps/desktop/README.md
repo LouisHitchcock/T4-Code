@@ -35,6 +35,7 @@ CUT3 desktop wraps the web UI in Electron and starts a desktop-scoped `t3` backe
 
 ## Release workflow notes
 
+- On Windows, the repo-root `build-windows-installer.bat` wrapper runs the standard `bun run dist:desktop:win` packaging flow and writes artifacts into `./release`.
 - The release workflow builds `apps/desktop/dist-electron` plus `apps/server/dist` once in Linux preflight, archives that bundle, and reuses it in each packaging job via `bun run dist:desktop:artifact -- --skip-build`.
 - Release assets are published for all supported desktop targets from one tag: macOS arm64/x64, Linux x64, and Windows x64.
 - The workflow always publishes `SHA256SUMS` for the final release assets.

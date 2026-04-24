@@ -99,6 +99,28 @@ function withTempPiAgentDir(options?: {
   readonly authJson?: string;
   readonly modelsJson?: string;
 }) {
+  const piProviderEnvKeys = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_BASE_URL",
+    "AZURE_OPENAI_RESOURCE_NAME",
+    "AZURE_OPENAI_API_VERSION",
+    "AZURE_OPENAI_DEPLOYMENT_NAME_MAP",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "CEREBRAS_API_KEY",
+    "XAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "AI_GATEWAY_API_KEY",
+    "ZAI_API_KEY",
+    "MISTRAL_API_KEY",
+    "MINIMAX_API_KEY",
+    "OPENCODE_API_KEY",
+    "KIMI_API_KEY",
+  ] as const;
+
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -107,15 +129,29 @@ function withTempPiAgentDir(options?: {
     yield* Effect.acquireRelease(
       Effect.sync(() => {
         const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+        const originalProviderEnv = Object.fromEntries(
+          piProviderEnvKeys.map((key) => [key, process.env[key]]),
+        ) as Record<(typeof piProviderEnvKeys)[number], string | undefined>;
         process.env.PI_CODING_AGENT_DIR = tmpDir;
-        return originalAgentDir;
+        for (const key of piProviderEnvKeys) {
+          delete process.env[key];
+        }
+        return { originalAgentDir, originalProviderEnv };
       }),
-      (originalAgentDir) =>
+      ({ originalAgentDir, originalProviderEnv }) =>
         Effect.sync(() => {
           if (originalAgentDir !== undefined) {
             process.env.PI_CODING_AGENT_DIR = originalAgentDir;
           } else {
             delete process.env.PI_CODING_AGENT_DIR;
+          }
+          for (const key of piProviderEnvKeys) {
+            const value = originalProviderEnv[key];
+            if (value !== undefined) {
+              process.env[key] = value;
+            } else {
+              delete process.env[key];
+            }
           }
         }),
     );

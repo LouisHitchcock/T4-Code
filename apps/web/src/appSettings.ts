@@ -23,7 +23,8 @@ import { CUSTOM_THEME_IDS } from "./lib/customThemes";
 import { normalizeModelPreferenceSlugs } from "./lib/modelPreferences";
 import { isOpenRouterGuaranteedFreeSlug } from "./lib/openRouterModels";
 
-const APP_SETTINGS_STORAGE_KEY = "cut3:app-settings:v1";
+const APP_SETTINGS_STORAGE_KEY = "t4code:app-settings:v1";
+const LEGACY_APP_SETTINGS_STORAGE_KEYS = ["cut3:app-settings:v1"] as const;
 const MAX_CUSTOM_MODEL_COUNT = 32;
 const MAX_FAVORITE_MODEL_COUNT = 32;
 const MAX_RECENT_MODEL_COUNT = 12;
@@ -536,6 +537,27 @@ function parsePersistedSettings(value: string | null): AppSettings {
   }
 }
 
+function readAppSettingsStorageRaw(storage: Storage): string | null {
+  const current = storage.getItem(APP_SETTINGS_STORAGE_KEY);
+  if (current !== null) {
+    return current;
+  }
+  for (const legacyKey of LEGACY_APP_SETTINGS_STORAGE_KEYS) {
+    const legacyValue = storage.getItem(legacyKey);
+    if (legacyValue === null) {
+      continue;
+    }
+    try {
+      storage.setItem(APP_SETTINGS_STORAGE_KEY, legacyValue);
+      storage.removeItem(legacyKey);
+    } catch {
+      // Best-effort migration only.
+    }
+    return legacyValue;
+  }
+  return null;
+}
+
 export function sanitizePersistedAppSettingsForStorage(settings: AppSettings): AppSettings {
   return {
     ...settings,
@@ -617,7 +639,7 @@ export function getAppSettingsSnapshot(): AppSettings {
 
   hydrateDesktopSecretsOnce();
 
-  const raw = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+  const raw = readAppSettingsStorageRaw(window.localStorage);
   if (raw !== cachedRawSettings) {
     const parsedSettings = parsePersistedSettings(raw);
     const migratedOpenRouterSecret = normalizeDesktopSecretValue(parsedSettings.openRouterApiKey);
@@ -665,6 +687,9 @@ function persistSettings(next: AppSettings): void {
   try {
     if (raw !== cachedRawSettings) {
       window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, raw);
+      for (const legacyKey of LEGACY_APP_SETTINGS_STORAGE_KEYS) {
+        window.localStorage.removeItem(legacyKey);
+      }
     }
   } catch {
     // Best-effort persistence only.
@@ -690,7 +715,10 @@ export function subscribeAppSettings(listener: () => void): () => void {
   hydrateDesktopSecretsOnce();
 
   const onStorage = (event: StorageEvent) => {
-    if (event.key === APP_SETTINGS_STORAGE_KEY) {
+    if (
+      event.key === APP_SETTINGS_STORAGE_KEY ||
+      LEGACY_APP_SETTINGS_STORAGE_KEYS.includes(event.key as never)
+    ) {
       emitChange();
     }
   };

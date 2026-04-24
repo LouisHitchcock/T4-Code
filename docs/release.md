@@ -22,6 +22,7 @@ Build commands:
   - `bun run dist:desktop:linux`
 - Windows x64 NSIS installer:
   - `bun run dist:desktop:win`
+  - or `build-windows-installer.bat` from the repo root on Windows
 
 All artifacts are written to `./release`.
 

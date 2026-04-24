@@ -20,6 +20,10 @@
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
     },
+    "./terminalRun": {
+      "types": "./src/terminalRun.ts",
+      "import": "./src/terminalRun.ts"
+    },
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"

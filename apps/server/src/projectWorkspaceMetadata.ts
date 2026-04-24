@@ -21,11 +21,24 @@ import {
 import { Schema } from "effect";
 
 const AGENTS_FILE_NAME = "AGENTS.md";
-const COMMANDS_DIRECTORY_RELATIVE_PATH = ".cut3/commands";
-const SKILLS_DIRECTORY_RELATIVE_PATH = ".cut3/skills";
+const COMMANDS_DIRECTORY_RELATIVE_PATH = ".t4code/commands";
+const LEGACY_COMMANDS_DIRECTORY_RELATIVE_PATH = ".cut3/commands";
+const SKILLS_DIRECTORY_RELATIVE_PATH = ".t4code/skills";
+const LEGACY_SKILLS_DIRECTORY_RELATIVE_PATH = ".cut3/skills";
 const SKILL_FILE_NAME = "SKILL.md";
-const INIT_SECTION_START = "<!-- CUT3_INIT:START -->";
-const INIT_SECTION_END = "<!-- CUT3_INIT:END -->";
+const INIT_SECTION_START = "<!-- T4CODE_INIT:START -->";
+const INIT_SECTION_END = "<!-- T4CODE_INIT:END -->";
+const LEGACY_INIT_SECTION_START = "<!-- CUT3_INIT:START -->";
+const LEGACY_INIT_SECTION_END = "<!-- CUT3_INIT:END -->";
+
+function resolveProjectRelativeDirectory(cwd: string, preferred: string, legacy: string): string {
+  const preferredAbsolutePath = path.join(cwd, preferred);
+  if (fs.existsSync(preferredAbsolutePath)) {
+    return preferred;
+  }
+  const legacyAbsolutePath = path.join(cwd, legacy);
+  return fs.existsSync(legacyAbsolutePath) ? legacy : preferred;
+}
 
 function safeReadTextFile(filePath: string): string | null {
   try {
@@ -119,7 +132,7 @@ function buildInitManagedSection(cwd: string): string {
 
   const lines: string[] = [
     INIT_SECTION_START,
-    "## CUT3 Init Snapshot",
+    "## T4Code Init Snapshot",
     "",
     `- Workspace root: ${path.basename(cwd)}`,
   ];
@@ -171,11 +184,25 @@ function mergeAgentsFileContents(existingContents: string | null, cwd: string): 
     ].join("\n");
   }
 
-  const startIndex = existingContents.indexOf(INIT_SECTION_START);
-  const endIndex = existingContents.indexOf(INIT_SECTION_END);
-  if (startIndex >= 0 && endIndex > startIndex) {
+  const managedRanges = [
+    [existingContents.indexOf(INIT_SECTION_START), existingContents.indexOf(INIT_SECTION_END)],
+    [
+      existingContents.indexOf(LEGACY_INIT_SECTION_START),
+      existingContents.indexOf(LEGACY_INIT_SECTION_END),
+    ],
+  ] as const;
+  const matchingRange = managedRanges.find(
+    ([startIndex, endIndex]) => startIndex >= 0 && endIndex > startIndex,
+  );
+  if (matchingRange) {
+    const [startIndex, endIndex] = matchingRange;
+    const endMarker = existingContents
+      .slice(startIndex, endIndex + LEGACY_INIT_SECTION_END.length)
+      .includes(LEGACY_INIT_SECTION_END)
+      ? LEGACY_INIT_SECTION_END
+      : INIT_SECTION_END;
     const before = existingContents.slice(0, startIndex).trimEnd();
-    const after = existingContents.slice(endIndex + INIT_SECTION_END.length).trimStart();
+    const after = existingContents.slice(endIndex + endMarker.length).trimStart();
     return [before, managedSection, after].filter((part) => part.length > 0).join("\n\n");
   }
 
@@ -384,7 +411,12 @@ export function draftProjectAgentsFile(
 export function listProjectCommandTemplates(
   input: ProjectListCommandTemplatesInput,
 ): ProjectListCommandTemplatesResult {
-  const commandsDirectory = path.join(input.cwd, COMMANDS_DIRECTORY_RELATIVE_PATH);
+  const commandsDirectoryRelativePath = resolveProjectRelativeDirectory(
+    input.cwd,
+    COMMANDS_DIRECTORY_RELATIVE_PATH,
+    LEGACY_COMMANDS_DIRECTORY_RELATIVE_PATH,
+  );
+  const commandsDirectory = path.join(input.cwd, commandsDirectoryRelativePath);
   let fileNames: string[] = [];
   try {
     fileNames = fs
@@ -414,7 +446,12 @@ export function listProjectCommandTemplates(
 }
 
 export function listProjectSkills(input: ProjectListSkillsInput): ProjectListSkillsResult {
-  const skillsDirectory = path.join(input.cwd, SKILLS_DIRECTORY_RELATIVE_PATH);
+  const skillsDirectoryRelativePath = resolveProjectRelativeDirectory(
+    input.cwd,
+    SKILLS_DIRECTORY_RELATIVE_PATH,
+    LEGACY_SKILLS_DIRECTORY_RELATIVE_PATH,
+  );
+  const skillsDirectory = path.join(input.cwd, skillsDirectoryRelativePath);
   const skillDirectoryNames = safeReadDirectoryNames(skillsDirectory);
   if (skillDirectoryNames.length === 0) {
     return {
@@ -448,13 +485,18 @@ export function resolveProjectSkillSelection(input: {
 
   const resolvedSkills: ResolvedProjectSkill[] = [];
   const seen = new Set<ProjectSkillName>();
+  const skillsDirectoryRelativePath = resolveProjectRelativeDirectory(
+    input.cwd,
+    SKILLS_DIRECTORY_RELATIVE_PATH,
+    LEGACY_SKILLS_DIRECTORY_RELATIVE_PATH,
+  );
   for (const skillName of input.skillNames) {
     if (seen.has(skillName)) {
       continue;
     }
     seen.add(skillName);
     const parsed = parseProjectSkill(
-      path.join(input.cwd, SKILLS_DIRECTORY_RELATIVE_PATH, skillName),
+      path.join(input.cwd, skillsDirectoryRelativePath, skillName),
       input.cwd,
     );
     if (parsed.skill) {

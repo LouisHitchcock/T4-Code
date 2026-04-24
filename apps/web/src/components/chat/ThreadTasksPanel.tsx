@@ -57,7 +57,7 @@ export const ThreadTasksPanel = memo(function ThreadTasksPanel(props: {
   }
   return (
     <div className="shrink-0 px-3 pt-3 sm:px-5">
-      <div className="mx-auto w-full max-w-3xl rounded-[24px] border border-border/70 bg-card/55 p-3 shadow-[0_18px_50px_-36px_--alpha(var(--color-black)/24%)] backdrop-blur-xs sm:p-4">
+      <div className="mx-auto w-full max-w-5xl rounded-[24px] border border-border/70 bg-card/55 p-3 shadow-[0_18px_50px_-36px_--alpha(var(--color-black)/24%)] backdrop-blur-xs sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
             <ListTodoIcon className="size-4 text-muted-foreground/80" />

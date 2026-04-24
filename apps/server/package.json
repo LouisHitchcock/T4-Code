@@ -1,5 +1,5 @@
 {
-  "name": "cut3",
+  "name": "t4code",
   "version": "1.0.1",
   "repository": {
     "type": "git",
@@ -7,7 +7,8 @@
     "directory": "apps/server"
   },
   "bin": {
-    "cut3": "./dist/index.mjs"
+    "cut3": "./dist/index.mjs",
+    "t4code": "./dist/index.mjs"
   },
   "files": [
     "dist"

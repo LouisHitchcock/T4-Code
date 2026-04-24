@@ -37,4 +37,4 @@ export interface ProviderCommandReactorShape {
 export class ProviderCommandReactor extends ServiceMap.Service<
   ProviderCommandReactor,
   ProviderCommandReactorShape
->()("cut3/orchestration/Services/ProviderCommandReactor") {}
+>()("t4code/orchestration/Services/ProviderCommandReactor") {}

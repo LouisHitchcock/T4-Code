@@ -1,7 +1,14 @@
-import { EventId, MessageId, TurnId, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import {
+  ApprovalRequestId,
+  EventId,
+  MessageId,
+  TurnId,
+  type OrchestrationThreadActivity,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveActiveThinkingContext,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
   deriveConfiguredModelOptions,
@@ -677,6 +684,84 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
+  it("omits streaming command-output activities by default", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-stream",
+        kind: "command.output.streaming",
+        summary: "Running command",
+        payload: {
+          itemType: "command_execution",
+          itemId: "item-stream-1",
+          data: {
+            item: {
+              id: "item-stream-1",
+              result: {
+                output: "line-1",
+              },
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-complete",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          itemId: "item-stream-1",
+          data: {
+            item: {
+              id: "item-stream-1",
+              command: "bun run lint",
+              result: {
+                output: "line-1",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["command-complete"]);
+  });
+
+  it("includes streaming command-output activities when requested", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-stream-include",
+        kind: "command.output.streaming",
+        summary: "Running command",
+        payload: {
+          itemType: "command_execution",
+          itemId: "item-stream-include",
+          data: {
+            item: {
+              id: "item-stream-include",
+              command: "bun run build",
+              result: {
+                output: "Compiling...",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined, {
+      includeStreamingCommandOutput: true,
+    });
+    expect(entry).toMatchObject({
+      id: "command-stream-include",
+      itemId: "item-stream-include",
+      activityKind: "command.output.streaming",
+      command: "bun run build",
+      detail: "Compiling...",
+      itemType: "command_execution",
+    });
+  });
+
   it("omits task start and completion lifecycle entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -720,6 +805,55 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-2"));
     expect(entries.map((entry) => entry.id)).toEqual(["turn-2"]);
+  });
+
+  it("keeps turn ids on derived work log entries for turn-aware timeline rendering", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "turn-entry",
+        turnId: "turn-42",
+        summary: "File change complete",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "turn-entry",
+      turnId: "turn-42",
+    });
+  });
+
+  it("keeps terminal command activities visible even when they are outside the latest turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "turn-2",
+        turnId: "turn-2",
+        summary: "Tool call complete",
+        kind: "tool.completed",
+      }),
+      makeActivity({
+        id: "terminal-command",
+        summary: "Command completed",
+        kind: "terminal.command.completed",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: "bun run lint",
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-2"));
+    expect(entries.map((entry) => entry.id)).toEqual(["terminal-command", "turn-2"]);
+    expect(entries[0]).toMatchObject({
+      command: "bun run lint",
+      alwaysVisible: true,
+    });
   });
 
   it("omits checkpoint captured info entries", () => {
@@ -817,6 +951,41 @@ describe("deriveWorkLogEntries", () => {
       itemType: "command_execution",
       toolTitle: "bash",
     });
+  });
+
+  it("uses structured command result content as command output detail", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-output",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          detail:
+            '"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe" -Command "cmd /c \\"echo shell=cmd && cd && ver\\""',
+          data: {
+            item: {
+              command: ["cmd", "/c", "echo shell=cmd && cd && ver"],
+              result: {
+                content:
+                  "shell=cmd\\nC:\\\\Users\\\\Louis\\\\Desktop\\\\Code\\\\T4-Code\\nMicrosoft Windows [Version 10.0.26200.8246]\\n",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      command: "cmd /c echo shell=cmd && cd && ver",
+      itemType: "command_execution",
+      toolTitle: "Ran command",
+    });
+    expect(entry?.detail).toContain("shell=cmd");
+    expect(entry?.detail).toContain("Microsoft Windows [Version 10.0.26200.8246]");
+    expect(entry?.detail).not.toContain("powershell.exe");
   });
 
   it("extracts changed file paths for file-change tool activities", () => {
@@ -1005,6 +1174,112 @@ describe("deriveTimelineEntries", () => {
       proposedPlan: {
         planMarkdown: "# Ship it",
       },
+    });
+  });
+});
+
+describe("deriveActiveThinkingContext", () => {
+  it("surfaces the latest command tool activity while a turn is running", () => {
+    const workEntries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "command-tool",
+          kind: "tool.completed",
+          summary: "Ran command",
+          payload: {
+            itemType: "command_execution",
+            data: {
+              item: {
+                command: ["bun", "run", "lint"],
+              },
+            },
+          },
+        }),
+      ],
+      undefined,
+    );
+
+    expect(
+      deriveActiveThinkingContext({
+        phase: "running",
+        sendPhase: "idle",
+        isRevertingCheckpoint: false,
+        activeWorkStartedAt: "2026-02-23T00:00:01.000Z",
+        workEntries,
+        pendingApproval: null,
+        pendingUserInput: null,
+      }),
+    ).toMatchObject({
+      kind: "tool",
+      live: true,
+      statusLabel: "Working",
+      headline: "Running command",
+      command: "bun run lint",
+      itemType: "command_execution",
+    });
+  });
+
+  it("prioritizes pending approvals over tool activity", () => {
+    const workEntries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "file-tool",
+          kind: "tool.completed",
+          summary: "File change",
+          payload: {
+            itemType: "file_change",
+            data: {
+              item: {
+                changes: [{ path: "apps/web/src/components/ChatView.tsx" }],
+              },
+            },
+          },
+        }),
+      ],
+      undefined,
+    );
+
+    expect(
+      deriveActiveThinkingContext({
+        phase: "running",
+        sendPhase: "idle",
+        isRevertingCheckpoint: false,
+        activeWorkStartedAt: "2026-02-23T00:00:01.000Z",
+        workEntries,
+        pendingApproval: {
+          requestId: ApprovalRequestId.makeUnsafe("req-1"),
+          requestKind: "file-change",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          detail: "Need approval to update ChatView.tsx",
+        },
+        pendingUserInput: null,
+      }),
+    ).toMatchObject({
+      kind: "waiting-approval",
+      live: true,
+      statusLabel: "Waiting",
+      headline: "Waiting for file change approval",
+      detail: "Need approval to update ChatView.tsx",
+      startedAt: "2026-02-23T00:00:02.000Z",
+    });
+  });
+
+  it("falls back to idle when nothing is active", () => {
+    expect(
+      deriveActiveThinkingContext({
+        phase: "ready",
+        sendPhase: "idle",
+        isRevertingCheckpoint: false,
+        activeWorkStartedAt: null,
+        workEntries: [],
+        pendingApproval: null,
+        pendingUserInput: null,
+      }),
+    ).toMatchObject({
+      kind: "idle",
+      live: false,
+      statusLabel: "Idle",
+      headline: "No active work",
     });
   });
 });

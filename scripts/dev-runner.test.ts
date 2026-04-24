@@ -13,12 +13,12 @@ import {
 
 it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("resolveOffset", () => {
-    it.effect("uses explicit CUT3_PORT_OFFSET when provided", () =>
+    it.effect("uses explicit T4CODE_PORT_OFFSET when provided", () =>
       Effect.sync(() => {
         const result = resolveOffset({ portOffset: 12, devInstance: undefined });
         assert.deepStrictEqual(result, {
           offset: 12,
-          source: "CUT3_PORT_OFFSET=12",
+          source: "T4CODE_PORT_OFFSET=12",
         });
       }),
     );
@@ -40,7 +40,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           }),
         );
 
-        assert.ok(error.includes("Invalid CUT3_PORT_OFFSET"));
+        assert.ok(error.includes("Invalid T4CODE_PORT_OFFSET"));
       }),
     );
   });

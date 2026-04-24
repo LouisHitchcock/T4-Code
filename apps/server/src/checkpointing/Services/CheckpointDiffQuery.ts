@@ -46,4 +46,4 @@ export interface CheckpointDiffQueryShape {
 export class CheckpointDiffQuery extends ServiceMap.Service<
   CheckpointDiffQuery,
   CheckpointDiffQueryShape
->()("cut3/checkpointing/Services/CheckpointDiffQuery") {}
+>()("t4code/checkpointing/Services/CheckpointDiffQuery") {}

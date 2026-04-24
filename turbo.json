@@ -38,8 +38,7 @@
       "cache": false
     },
     "test": {
-      "dependsOn": ["^build"],
-      "cache": false,
+      "dependsOn": ["^test"],
       "outputs": []
     }
   }

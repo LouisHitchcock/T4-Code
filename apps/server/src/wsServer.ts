@@ -36,6 +36,10 @@ import {
   WsResponse,
   WsRpcResultSchemaByMethod,
   type WsPushEnvelopeBase,
+  type TerminalExecInput,
+  type TerminalExecEvent,
+  type TerminalEvent,
+  type TerminalOpenInput,
 } from "@t3tools/contracts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
@@ -57,6 +61,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
+import { TerminalCommandRunner } from "./terminal/Services/CommandRunner.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { searchWorkspaceEntries } from "./workspaceEntries";
@@ -107,6 +112,7 @@ import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 import { getWsAuthToken, redactWsAuthToken } from "@t3tools/shared/wsAuth";
+import { isBangCommandTerminalId } from "@t3tools/shared/terminalRun";
 import { listCodexMcpServerStatuses } from "./codexMcpServerStatus.ts";
 import {
   buildAllowedWebSocketOrigins,
@@ -151,7 +157,7 @@ export interface ServerShape {
 /**
  * Server - Service tag for HTTP/WebSocket lifecycle management.
  */
-export class Server extends ServiceMap.Service<Server, ServerShape>()("cut3/wsServer/Server") {}
+export class Server extends ServiceMap.Service<Server, ServerShape>()("t4code/wsServer/Server") {}
 
 const isServerNotRunningError = (error: Error): boolean => {
   const maybeCode = (error as NodeJS.ErrnoException).code;
@@ -369,6 +375,7 @@ export type ServerRuntimeServices =
   | GitManager
   | GitCore
   | TerminalManager
+  | TerminalCommandRunner
   | Keybindings
   | Open
   | AnalyticsService;
@@ -384,6 +391,42 @@ export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycl
 class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("RouteRequestError", {
   message: Schema.String,
 }) {}
+
+interface BangCommandRunState {
+  threadId: string;
+  terminalId: string;
+  commandText: string;
+  cwd: string;
+  outputTail: string;
+  runningActivityId: string;
+}
+
+const BANG_COMMAND_OUTPUT_TAIL_LIMIT = 6_000;
+
+function bangCommandRunKey(threadId: string, terminalId: string): string {
+  return `${threadId}\u0000${terminalId}`;
+}
+function bangCommandRunningActivityId(threadId: string, terminalId: string): string {
+  return `activity:terminal.command.running:${threadId}:${terminalId}`;
+}
+
+function appendBangCommandOutputTail(existing: string, chunk: string): string {
+  const next = `${existing}${chunk}`;
+  return next.length <= BANG_COMMAND_OUTPUT_TAIL_LIMIT
+    ? next
+    : next.slice(-BANG_COMMAND_OUTPUT_TAIL_LIMIT);
+}
+
+function extractBangCommandText(input: TerminalOpenInput): string | null {
+  if (!isBangCommandTerminalId(input.terminalId ?? "")) {
+    return null;
+  }
+  const lastArg = input.args?.at(-1);
+  if (typeof lastArg !== "string" || lastArg.trim().length === 0) {
+    return null;
+  }
+  return lastArg;
+}
 
 export const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
@@ -405,6 +448,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const availableEditors = resolveAvailableEditors();
   const gitManager = yield* GitManager;
   const terminalManager = yield* TerminalManager;
+  const terminalCommandRunner = yield* TerminalCommandRunner;
   const keybindingsManager = yield* Keybindings;
   const providerService = yield* ProviderService;
   const providerHealth = yield* ProviderHealth;
@@ -1179,11 +1223,162 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
   >();
   const runPromise = Effect.runPromiseWith(runtimeServices);
+  const bangCommandRuns = new Map<string, BangCommandRunState>();
+  const appendBangCommandActivity = (input: {
+    threadId: string;
+    createdAt: string;
+    tone: "tool" | "error";
+    kind: string;
+    summary: string;
+    commandText: string;
+    cwd: string;
+    activityId?: string | undefined;
+    detail?: string | undefined;
+    exitCode?: number | null | undefined;
+    exitSignal?: number | null | undefined;
+  }) =>
+    orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: CommandId.makeUnsafe(`server:${input.kind}:${crypto.randomUUID()}`),
+      threadId: ThreadId.makeUnsafe(input.threadId),
+      activity: {
+        id: EventId.makeUnsafe(
+          input.activityId ?? `activity:${crypto.randomUUID()}`,
+        ),
+        tone: input.tone,
+        kind: input.kind,
+        summary: input.summary,
+        payload: {
+          itemType: "command_execution",
+          requestKind: "command",
+          title: "terminal",
+          ...(input.detail && input.detail.trim().length > 0 ? { detail: input.detail } : {}),
+          data: {
+            command: input.commandText,
+            cwd: input.cwd,
+            item: {
+              command: input.commandText,
+              result: {
+                ...(input.exitCode !== undefined ? { exitCode: input.exitCode } : {}),
+                ...(input.exitSignal !== undefined ? { exitSignal: input.exitSignal } : {}),
+              },
+            },
+          },
+        },
+        turnId: null,
+        createdAt: input.createdAt,
+      },
+      createdAt: input.createdAt,
+    });
+  const handleTrackedBangTerminalEvent = (event: TerminalEvent) =>
+    Effect.gen(function* () {
+      const runState = bangCommandRuns.get(bangCommandRunKey(event.threadId, event.terminalId));
+      if (!runState) {
+        return;
+      }
 
-  const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
-    (event) => void Effect.runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
+      switch (event.type) {
+        case "started":
+          yield* appendBangCommandActivity({
+            threadId: runState.threadId,
+            createdAt: event.createdAt,
+            tone: "tool",
+            kind: "terminal.command.started",
+            summary: "Running command",
+            commandText: runState.commandText,
+            cwd: runState.cwd,
+            activityId: runState.runningActivityId,
+          });
+          return;
+
+        case "output":
+          runState.outputTail = appendBangCommandOutputTail(runState.outputTail, event.data);
+          yield* appendBangCommandActivity({
+            threadId: runState.threadId,
+            createdAt: event.createdAt,
+            tone: "tool",
+            kind: "terminal.command.started",
+            summary: "Running command",
+            commandText: runState.commandText,
+            cwd: runState.cwd,
+            activityId: runState.runningActivityId,
+            detail: runState.outputTail.trim().length > 0 ? runState.outputTail : undefined,
+          });
+          return;
+
+        case "exited":
+          bangCommandRuns.delete(bangCommandRunKey(event.threadId, event.terminalId));
+          yield* appendBangCommandActivity({
+            threadId: runState.threadId,
+            createdAt: event.createdAt,
+            tone: event.exitCode === 0 ? "tool" : "error",
+            kind: "terminal.command.completed",
+            summary: event.exitCode === 0 ? "Command completed" : "Command failed",
+            commandText: runState.commandText,
+            cwd: runState.cwd,
+            detail: runState.outputTail.trim().length > 0 ? runState.outputTail : undefined,
+            exitCode: event.exitCode,
+            exitSignal: event.exitSignal,
+          });
+          yield* terminalManager.close({
+            threadId: runState.threadId,
+            terminalId: runState.terminalId,
+          });
+          return;
+
+        case "error":
+          bangCommandRuns.delete(bangCommandRunKey(event.threadId, event.terminalId));
+          yield* appendBangCommandActivity({
+            threadId: runState.threadId,
+            createdAt: event.createdAt,
+            tone: "error",
+            kind: "terminal.command.completed",
+            summary: "Command failed",
+            commandText: runState.commandText,
+            cwd: runState.cwd,
+            detail: event.message,
+          });
+          yield* terminalManager.close({
+            threadId: runState.threadId,
+            terminalId: runState.terminalId,
+          });
+          return;
+
+        case "cleared":
+        case "restarted":
+        case "activity":
+          return;
+      }
+    });
+
+  const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) => {
+    void runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)).catch((error) => {
+      logger.error("failed to publish terminal event", {
+        terminalEventType: event.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    void runPromise(handleTrackedBangTerminalEvent(event)).catch((error) => {
+      logger.error("failed to mirror tracked terminal event into thread activity", {
+        terminalEventType: event.type,
+        threadId: event.threadId,
+        terminalId: event.terminalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  });
+  const unsubscribeTerminalExecEvents = yield* terminalCommandRunner.subscribe(
+    (event: TerminalExecEvent) => {
+      void runPromise(pushBus.publishAll(WS_CHANNELS.terminalExecEvent, event)).catch((error) => {
+        logger.error("failed to publish terminal exec event", {
+          terminalExecEventType: event.type,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
   );
   yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeTerminalEvents()));
+  yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeTerminalExecEvents()));
   yield* readiness.markTerminalSubscriptionsReady;
 
   yield* NodeHttpServer.make(() => httpServer, listenOptions).pipe(
@@ -1766,13 +1961,54 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.terminalOpen: {
         const body = stripRequestTag(request.body);
-        return yield* terminalManager.open({
+        const authorizedCwd = yield* authorizePath({
+          requestedPath: body.cwd,
+          operation: "Terminal open",
+        });
+        const normalizedInput = {
+          ...body,
+          cwd: authorizedCwd,
+        } satisfies TerminalOpenInput;
+        const bangCommandText = extractBangCommandText(normalizedInput);
+        if (bangCommandText) {
+          bangCommandRuns.set(
+            bangCommandRunKey(normalizedInput.threadId, normalizedInput.terminalId ?? ""),
+            {
+              threadId: normalizedInput.threadId,
+              terminalId: normalizedInput.terminalId ?? "",
+              commandText: bangCommandText,
+              cwd: normalizedInput.cwd,
+              outputTail: "",
+              runningActivityId: bangCommandRunningActivityId(
+                normalizedInput.threadId,
+                normalizedInput.terminalId ?? "",
+              ),
+            },
+          );
+        }
+        return yield* terminalManager.open(normalizedInput).pipe(
+          Effect.tapError(() =>
+            Effect.sync(() => {
+              if (normalizedInput.terminalId) {
+                bangCommandRuns.delete(
+                  bangCommandRunKey(normalizedInput.threadId, normalizedInput.terminalId),
+                );
+              }
+            }),
+          ),
+        );
+      }
+
+      case WS_METHODS.terminalExec: {
+        const body = stripRequestTag(request.body);
+        const normalizedInput = {
           ...body,
           cwd: yield* authorizePath({
             requestedPath: body.cwd,
-            operation: "Terminal open",
+            operation: "Terminal exec",
           }),
-        });
+        } satisfies TerminalExecInput;
+        return yield* terminalCommandRunner.exec(normalizedInput);
       }
 
       case WS_METHODS.terminalWrite: {

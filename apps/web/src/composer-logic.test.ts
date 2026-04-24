@@ -6,6 +6,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToMention,
+  parseStandaloneComposerBangCommand,
   parseStandaloneComposerSlashCommand,
   parseStandaloneComposerSlashInvocation,
   replaceTextRange,
@@ -269,6 +270,27 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseStandaloneComposerBangCommand", () => {
+  it("parses standalone bang commands", () => {
+    expect(parseStandaloneComposerBangCommand(" !bun run lint ")).toBe("bun run lint");
+  });
+
+  it("preserves the remainder of the command verbatim after the bang", () => {
+    expect(parseStandaloneComposerBangCommand("!   bun run test --watch")).toBe(
+      "   bun run test --watch",
+    );
+  });
+
+  it("rejects empty bang commands", () => {
+    expect(parseStandaloneComposerBangCommand("!")).toBeNull();
+    expect(parseStandaloneComposerBangCommand("!   ")).toBeNull();
+  });
+
+  it("ignores non-bang composer input", () => {
+    expect(parseStandaloneComposerBangCommand("please run !bun test")).toBeNull();
   });
 });
 

@@ -388,6 +388,10 @@ Your active mode changes only when new developer instructions with a different \
 The \`request_user_input\` tool is unavailable in Default mode. If you call it while in Default mode, it will return an error.
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
+
+## command execution fidelity
+
+When the user asks to run a shell command, execute the requested command directly. Do not replace user-requested commands with environment probes or shell diagnostics (for example \`cmd /c "echo shell=cmd && cd && ver"\`) unless the user explicitly requested diagnostics or a prior command failed and you are debugging that specific failure.
 </collaboration_mode>`;
 
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {

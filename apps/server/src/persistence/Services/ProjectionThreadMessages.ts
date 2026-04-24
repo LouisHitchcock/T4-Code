@@ -78,4 +78,4 @@ export interface ProjectionThreadMessageRepositoryShape {
 export class ProjectionThreadMessageRepository extends ServiceMap.Service<
   ProjectionThreadMessageRepository,
   ProjectionThreadMessageRepositoryShape
->()("cut3/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository") {}
+>()("t4code/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository") {}

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createLockedPiSettingsManager } from "./piHarness.ts";
+import { createLockedPiSettingsManager, createPiHarnessCatalogSnapshot } from "./piHarness.ts";
 
 describe("createLockedPiSettingsManager", () => {
   it("preserves Pi runtime defaults while stripping package and resource discovery settings", () => {
@@ -67,5 +67,37 @@ describe("createLockedPiSettingsManager", () => {
     expect(settingsManager.getEnableSkillCommands()).toBe(false);
     expect(settingsManager.getCompactionSettings().reserveTokens).toBe(222);
     expect(settingsManager.getRetrySettings().maxRetries).toBe(3);
+  });
+});
+
+describe("createPiHarnessCatalogSnapshot", () => {
+  it("honors PI_CODING_AGENT_DIR when no explicit agentDir is passed", () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "cut3-pi-catalog-"));
+    const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = cwd;
+
+    try {
+      fs.writeFileSync(
+        path.join(cwd, "auth.json"),
+        JSON.stringify({
+          openai: {
+            type: "api_key",
+            key: "sk-test",
+          },
+        }),
+        "utf8",
+      );
+
+      const snapshot = createPiHarnessCatalogSnapshot();
+      expect(snapshot.agentDir).toBe(cwd);
+      expect(snapshot.authProviders).toContain("openai");
+    } finally {
+      if (originalAgentDir === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+      }
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

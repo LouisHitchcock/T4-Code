@@ -19,6 +19,7 @@ import { createLogger } from "../../logger";
 import { PtyAdapter, PtyAdapterShape, type PtyExitEvent, type PtyProcess } from "../Services/PTY";
 import { runProcess } from "../../processRunner";
 import { ServerConfig } from "../../config";
+import { createTerminalSpawnEnv, normalizedRuntimeEnv } from "../terminalEnv";
 import {
   ShellCandidate,
   TerminalError,
@@ -35,7 +36,6 @@ const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
-const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECTRON_RUN_AS_NODE"]);
 
 const decodeTerminalOpenInput = Schema.decodeUnknownSync(TerminalOpenInput);
 const decodeTerminalRestartInput = Schema.decodeUnknownSync(TerminalRestartInput);
@@ -78,6 +78,26 @@ function shellCandidateFromCommand(command: string | null): ShellCandidate | nul
   return { shell: command };
 }
 
+function resolveWindowsAbsoluteShellPath(shellName: string): string | null {
+  if (process.platform !== "win32") {
+    return null;
+  }
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!windowsRoot) {
+    return null;
+  }
+  switch (shellName.toLowerCase()) {
+    case "cmd":
+    case "cmd.exe":
+      return path.join(windowsRoot, "System32", "cmd.exe");
+    case "powershell":
+    case "powershell.exe":
+      return path.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    default:
+      return null;
+  }
+}
+
 function formatShellCandidate(candidate: ShellCandidate): string {
   if (!candidate.args || candidate.args.length === 0) return candidate.shell;
   return `${candidate.shell} ${candidate.args.join(" ")}`;
@@ -105,6 +125,8 @@ function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
       shellCandidateFromCommand(process.env.ComSpec ?? null),
       shellCandidateFromCommand("powershell.exe"),
       shellCandidateFromCommand("cmd.exe"),
+      shellCandidateFromCommand(resolveWindowsAbsoluteShellPath("powershell.exe")),
+      shellCandidateFromCommand(resolveWindowsAbsoluteShellPath("cmd.exe")),
     ]);
   }
 
@@ -165,6 +187,154 @@ function isRetryableShellSpawnError(error: unknown): boolean {
     message.includes("file not found") ||
     message.includes("no such file")
   );
+}
+
+interface DirectLaunchCandidate {
+  shell: string;
+  args: string[] | null;
+}
+
+function maybeStripWrappingQuotes(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return null;
+  }
+  const firstChar = trimmed[0];
+  const lastChar = trimmed.at(-1);
+  if (
+    (firstChar === "\"" && lastChar === "\"") ||
+    (firstChar === "'" && lastChar === "'")
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return null;
+}
+
+function parseCommandLineTokens(commandLine: string): string[] {
+  const trimmed = commandLine.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+  const tokens: string[] = [];
+  const pattern = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s]+)/g;
+  for (const match of trimmed.matchAll(pattern)) {
+    const rawToken = match[1] ?? match[2] ?? match[3] ?? "";
+    const normalizedToken = rawToken.replace(/\\(["'])/g, "$1");
+    if (normalizedToken.length > 0) {
+      tokens.push(normalizedToken);
+    }
+  }
+  return tokens;
+}
+
+function formatDirectLaunchCandidate(candidate: DirectLaunchCandidate): string {
+  return formatDirectLaunch(candidate.shell, candidate.args);
+}
+
+function uniqueDirectLaunchCandidates(
+  candidates: ReadonlyArray<DirectLaunchCandidate>,
+): DirectLaunchCandidate[] {
+  const seen = new Set<string>();
+  const ordered: DirectLaunchCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = formatDirectLaunchCandidate(candidate);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    ordered.push(candidate);
+  }
+  return ordered;
+}
+
+function resolveWindowsPowerShellFallbackCandidates(
+  candidate: DirectLaunchCandidate,
+): DirectLaunchCandidate[] {
+  if (process.platform !== "win32") {
+    return [];
+  }
+  const shellName = path.basename(candidate.shell).toLowerCase();
+  if (shellName !== "powershell.exe" && shellName !== "powershell") {
+    return [];
+  }
+  return [
+    {
+      shell: "pwsh.exe",
+      args: candidate.args,
+    },
+    {
+      shell: "pwsh",
+      args: candidate.args,
+    },
+  ];
+}
+
+function resolveWindowsAbsoluteDirectLaunchFallbackCandidates(
+  candidate: DirectLaunchCandidate,
+): DirectLaunchCandidate[] {
+  if (process.platform !== "win32") {
+    return [];
+  }
+  const shellName = path.basename(candidate.shell).toLowerCase();
+  const absoluteShell = resolveWindowsAbsoluteShellPath(shellName);
+  if (!absoluteShell) {
+    return [];
+  }
+  return [
+    {
+      shell: absoluteShell,
+      args: candidate.args,
+    },
+  ];
+}
+
+function resolveDirectLaunchCandidates(
+  launchCommand: string,
+  launchArgs: ReadonlyArray<string> | null,
+): DirectLaunchCandidate[] {
+  const candidates: DirectLaunchCandidate[] = [
+    {
+      shell: launchCommand,
+      args: launchArgs ? [...launchArgs] : null,
+    },
+  ];
+
+  if (!launchArgs || launchArgs.length === 0) {
+    const unquotedCommand = maybeStripWrappingQuotes(launchCommand);
+    if (unquotedCommand && unquotedCommand !== launchCommand) {
+      candidates.push({
+        shell: unquotedCommand,
+        args: null,
+      });
+    }
+
+    const parsedTokens = parseCommandLineTokens(launchCommand);
+    if (parsedTokens.length > 1) {
+      const [parsedCommand, ...parsedArgs] = parsedTokens;
+      if (parsedCommand) {
+        candidates.push({
+          shell: parsedCommand,
+          args: parsedArgs,
+        });
+        const unquotedParsedCommand = maybeStripWrappingQuotes(parsedCommand);
+        if (unquotedParsedCommand && unquotedParsedCommand !== parsedCommand) {
+          candidates.push({
+            shell: unquotedParsedCommand,
+            args: parsedArgs,
+          });
+        }
+      }
+    }
+  }
+
+  const uniqueCandidates = uniqueDirectLaunchCandidates(candidates);
+  return uniqueDirectLaunchCandidates([
+    ...uniqueCandidates,
+    ...uniqueCandidates.flatMap((candidate) =>
+      resolveWindowsAbsoluteDirectLaunchFallbackCandidates(candidate),
+    ),
+    ...uniqueCandidates.flatMap((candidate) => resolveWindowsPowerShellFallbackCandidates(candidate)),
+  ]);
 }
 
 async function checkWindowsSubprocessActivity(terminalPid: number): Promise<boolean> {
@@ -270,44 +440,6 @@ function toSafeTerminalId(terminalId: string): string {
 
 function toSessionKey(threadId: string, terminalId: string): string {
   return `${threadId}\u0000${terminalId}`;
-}
-
-function shouldExcludeTerminalEnvKey(key: string): boolean {
-  const normalizedKey = key.toUpperCase();
-  if (normalizedKey.startsWith("CUT3_")) {
-    return true;
-  }
-  if (normalizedKey.startsWith("VITE_")) {
-    return true;
-  }
-  return TERMINAL_ENV_BLOCKLIST.has(normalizedKey);
-}
-
-function createTerminalSpawnEnv(
-  baseEnv: NodeJS.ProcessEnv,
-  runtimeEnv?: Record<string, string> | null,
-): NodeJS.ProcessEnv {
-  const spawnEnv: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(baseEnv)) {
-    if (value === undefined) continue;
-    if (shouldExcludeTerminalEnvKey(key)) continue;
-    spawnEnv[key] = value;
-  }
-  if (runtimeEnv) {
-    for (const [key, value] of Object.entries(runtimeEnv)) {
-      spawnEnv[key] = value;
-    }
-  }
-  return spawnEnv;
-}
-
-function normalizedRuntimeEnv(
-  env: Record<string, string> | undefined,
-): Record<string, string> | null {
-  if (!env) return null;
-  const entries = Object.entries(env);
-  if (entries.length === 0) return null;
-  return Object.fromEntries(entries.toSorted(([left], [right]) => left.localeCompare(right)));
 }
 
 function normalizedLaunchCommand(command: string | undefined): string | null {
@@ -649,17 +781,38 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     try {
       const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
       if (session.launchCommand) {
-        ptyProcess = await Effect.runPromise(
-          this.ptyAdapter.spawn({
-            shell: session.launchCommand,
-            ...(session.launchArgs ? { args: session.launchArgs } : {}),
-            cwd: session.cwd,
-            cols: session.cols,
-            rows: session.rows,
-            env: terminalEnv,
-          }),
+        const launchCandidates = resolveDirectLaunchCandidates(
+          session.launchCommand,
+          session.launchArgs,
         );
-        startedProcessLabel = formatDirectLaunch(session.launchCommand, session.launchArgs);
+        let lastSpawnError: unknown = null;
+        for (const launchCandidate of launchCandidates) {
+          try {
+            ptyProcess = await Effect.runPromise(
+              this.ptyAdapter.spawn({
+                shell: launchCandidate.shell,
+                ...(launchCandidate.args ? { args: launchCandidate.args } : {}),
+                cwd: session.cwd,
+                cols: session.cols,
+                rows: session.rows,
+                env: terminalEnv,
+              }),
+            );
+            startedProcessLabel = formatDirectLaunchCandidate(launchCandidate);
+            break;
+          } catch (error) {
+            lastSpawnError = error;
+            if (!isRetryableShellSpawnError(error)) {
+              throw error;
+            }
+          }
+        }
+        if (!ptyProcess && lastSpawnError) {
+          throw lastSpawnError;
+        }
+        if (!ptyProcess) {
+          throw new Error("Terminal start failed");
+        }
       } else {
         const shellCandidates = resolveShellCandidates(this.shellResolver);
         let lastSpawnError: unknown = null;

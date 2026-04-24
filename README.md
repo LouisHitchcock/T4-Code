@@ -62,10 +62,12 @@ CUT3 now recognizes three repo-owned workspace surfaces:
 From the composer:
 
 - Run built-in slash commands such as `/new` (`/clear`), `/compact` (`/summarize`), `/share`, `/unshare`, `/undo`, `/redo`, `/export`, `/details`, `/init`, `/plan`, `/default`, `/model`, and `/mcp` (when the active provider supports MCP).
+- Run standalone local terminal commands with `!`, for example `!bun run lint`. CUT3 launches these in a hidden thread-scoped terminal using the current thread workspace cwd/env, then appends durable started/completed command rows to the conversation.
 - Type `/` to see those built-in commands plus any templates discovered from `.cut3/commands/*.md`.
 - Open the Skills picker to attach repo-local skills discovered from `.cut3/skills/<name>/SKILL.md`. Skill files must include `name` and `description` frontmatter, and `name` must match the lowercase hyphenated directory name.
 - Attach up to **8 images per message** with the paperclip button, drag-and-drop, or paste. CUT3 accepts image files only, enforces a **10 MB per image** limit, shows inline previews in the composer and thread timeline, and includes attachment names in bootstrap/export summaries.
 - When a turn is already running, use the composer follow-up controls to **Queue** the next message or **Steer** the run so CUT3 interrupts the current turn and sends your new follow-up next. Press `Enter` to use the current Queue/Steer mode, or `Cmd/Ctrl+Enter` to use the opposite mode for that one follow-up.
+- Watch the activity strip above the timeline for live status. It keeps idle vs working state visible and shows compact command/file context for the latest active tool, approval, or local `!` command.
 - Template frontmatter can set `description`, optional `provider`, optional `model`, optional `interactionMode`, optional `runtimeMode`, and optional `sendImmediately`.
 
 Template bodies support `$ARGUMENTS` plus positional placeholders `$1` through `$9`.
@@ -92,6 +94,8 @@ bun run dist:desktop:win
 ```
 
 Artifacts are written to `./release`.
+
+On Windows, you can also double-click [build-windows-installer.bat](build-windows-installer.bat) from the repo root. It runs the same `bun run dist:desktop:win` packaging flow and writes the installer into `./release`.
 
 Use the matching host OS when possible:
 

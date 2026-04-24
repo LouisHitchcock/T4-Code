@@ -28,6 +28,7 @@ import {
   ServerOpenCodeCredentialResult,
   ServerOpenCodeState,
   ServerUpsertKeybindingResult,
+  TerminalExecResult,
   TerminalSessionSnapshot,
   ThreadCompactResult,
   ThreadCreateShareResult,
@@ -177,8 +178,11 @@ export function createWsNativeApi(): NativeApi {
       restart: (input) =>
         requestWithSchema(WS_METHODS.terminalRestart, TerminalSessionSnapshot, input),
       close: (input) => requestWithSchema(WS_METHODS.terminalClose, Schema.Void, input),
+      exec: (input) => requestWithSchema(WS_METHODS.terminalExec, TerminalExecResult, input),
       onEvent: (callback) =>
         transport.subscribe(WS_CHANNELS.terminalEvent, (message) => callback(message.data)),
+      onExecEvent: (callback) =>
+        transport.subscribe(WS_CHANNELS.terminalExecEvent, (message) => callback(message.data)),
     },
     projects: {
       searchEntries: (input) =>

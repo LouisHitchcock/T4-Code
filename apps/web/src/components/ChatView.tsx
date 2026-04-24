@@ -117,11 +117,13 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   getComposerSlashCommandAliases,
+  parseStandaloneComposerBangCommand,
   parseStandaloneComposerSlashInvocation,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "../composer-logic";
 import {
+  deriveActiveThinkingContext,
   deriveConfiguredModelOptions,
   deriveConfiguredReasoningState,
   deriveInterruptTurnId,
@@ -136,6 +138,7 @@ import {
   getProviderPickerBackingProvider,
   getProviderPickerKindForSelection,
   findLatestProposedPlan,
+  type ActiveThinkingContext,
   type AvailableProviderPickerKind,
   type LatestModelRerouteNotice,
   type PendingApproval,
@@ -336,10 +339,12 @@ import {
 } from "../threadActivityMetadata";
 import { findMatchingApprovalRule, type ApprovalRule } from "../approvalRules";
 import { formatTimestamp } from "../timestampFormat";
+import { buildBangCommandTerminalId } from "@t3tools/shared/terminalRun";
 import { showTurnCompleteNotification } from "../notifications";
 
-const LAST_EDITOR_KEY = "cut3:last-editor";
-const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "cut3:last-invoked-script-by-project";
+const LAST_EDITOR_KEY = "t4code:last-editor";
+const LEGACY_LAST_EDITOR_KEY = "cut3:last-editor";
+const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t4code:last-invoked-script-by-project";
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
@@ -366,6 +371,16 @@ const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnsw
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+
+function buildComposerActivitySubtext(context: ActiveThinkingContext): string | null {
+  if (!context.live || context.kind === "idle") {
+    return null;
+  }
+  if (context.kind === "tool" && context.itemType === "command_execution") {
+    return context.command ? `Running command: ${context.command}` : "Running command";
+  }
+  return context.headline;
+}
 const WORKTREE_BRANCH_PREFIX = "cut3";
 
 function buildProviderOptionsForDispatch(input: {
@@ -2235,6 +2250,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
         : null,
     [activePendingApproval, activeProject?.id, settings.approvalRules],
   );
+  const activeThinkingContext = useMemo(
+    () =>
+      deriveActiveThinkingContext({
+        phase,
+        sendPhase,
+        isRevertingCheckpoint,
+        activeWorkStartedAt,
+        workEntries: workLogEntries,
+        pendingApproval: activePendingApproval,
+        pendingUserInput: activePendingUserInput,
+      }),
+    [
+      activePendingApproval,
+      activePendingUserInput,
+      activeWorkStartedAt,
+      isRevertingCheckpoint,
+      phase,
+      sendPhase,
+      workLogEntries,
+    ],
+  );
+  const composerActivitySubtext = useMemo(
+    () => buildComposerActivitySubtext(activeThinkingContext),
+    [activeThinkingContext],
+  );
+  const composerActivityElapsed = useMemo(
+    () =>
+      activeThinkingContext.live && activeThinkingContext.startedAt
+        ? formatElapsed(activeThinkingContext.startedAt, nowIso)
+        : null,
+    [activeThinkingContext.live, activeThinkingContext.startedAt, nowIso],
+  );
   const isComposerApprovalState = activePendingApproval !== null;
   const activeInterruptTurnId = deriveInterruptTurnId(
     activeLatestTurn,
@@ -2507,7 +2554,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   const visibleWorkLogEntries = useMemo(
-    () => (settings.showToolDetails ? workLogEntries : []),
+    () =>
+      settings.showToolDetails
+        ? workLogEntries
+        : workLogEntries.filter((entry) => entry.alwaysVisible === true),
     [settings.showToolDetails, workLogEntries],
   );
   const timelineEntries = useMemo(
@@ -2528,6 +2578,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
       byMessageId.set(summary.assistantMessageId, summary);
     }
     return byMessageId;
+  }, [turnDiffSummaries]);
+  const workLogTurnDiffSummaryByTurnId = useMemo(() => {
+    const byTurnId = new Map<TurnId, TurnDiffSummary>();
+    for (const summary of turnDiffSummaries) {
+      byTurnId.set(summary.turnId, summary);
+    }
+    return byTurnId;
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
@@ -4771,6 +4828,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const trimmed = prompt.trim();
       const standaloneSlashCommand =
         composerImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
+      const standaloneBangCommand =
+        composerImages.length === 0 ? parseStandaloneComposerBangCommand(trimmed) : null;
       if (standaloneSlashCommand) {
         if (options?.allowStandaloneCommands === false) {
           toastManager.add({
@@ -4789,6 +4848,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setComposerCursor(0);
         setComposerTrigger(null);
         return { kind: "handled-command" as const };
+      }
+
+      if (standaloneBangCommand) {
+        if (options?.allowStandaloneCommands === false) {
+          toastManager.add({
+            type: "warning",
+            title: "Terminal commands can't be queued",
+            description:
+              "Run the command now, or queue a normal message instead of a standalone ! command.",
+          });
+          return null;
+        }
+        return {
+          kind: "bang-command" as const,
+          commandText: standaloneBangCommand,
+        };
       }
 
       const standaloneSlashInvocation =
@@ -4934,6 +5009,83 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerTrigger(null);
     },
     [clearComposerDraftContent],
+  );
+  const runStandaloneBangCommand = useCallback(
+    async (commandText: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThreadId || !activeProject || !activeThread) {
+        return;
+      }
+
+      beginSendPhase(activeThreadId, "sending-turn");
+      setThreadError(activeThreadId, null);
+      const targetCwd = gitCwd ?? activeProject.cwd;
+      const runtimeEnv = projectScriptRuntimeEnv({
+        project: {
+          cwd: activeProject.cwd,
+        },
+        worktreePath: activeThread.worktreePath ?? null,
+      });
+      const terminalId = buildBangCommandTerminalId(randomUUID());
+      const terminalCommandInput = `${commandText}\rexit\r`;
+
+      try {
+        if (isLocalDraftThread) {
+          await api.orchestration.dispatchCommand({
+            type: "thread.create",
+            commandId: newCommandId(),
+            threadId: activeThreadId,
+            projectId: activeProject.id,
+            title: truncateTitle(`!${commandText.trimStart()}`),
+            model:
+              (activeThread.model as ModelSlug) ||
+              (activeProject.model as ModelSlug) ||
+              DEFAULT_MODEL_BY_PROVIDER.codex,
+            runtimeMode,
+            interactionMode,
+            branch: activeThread.branch,
+            worktreePath: activeThread.worktreePath,
+            createdAt: activeThread.createdAt,
+          });
+        }
+
+        await api.terminal.open({
+          threadId: activeThreadId,
+          terminalId,
+          cwd: targetCwd,
+          env: runtimeEnv,
+          cols: SCRIPT_TERMINAL_COLS,
+          rows: SCRIPT_TERMINAL_ROWS,
+          args: [commandText],
+        });
+        await api.terminal.write({
+          threadId: activeThreadId,
+          terminalId,
+          data: terminalCommandInput,
+        });
+        clearComposerAfterSendCapture(activeThreadId);
+      } catch (error) {
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : "Failed to run terminal command.",
+        );
+      } finally {
+        resetSendPhase(activeThreadId);
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      activeThreadId,
+      beginSendPhase,
+      clearComposerAfterSendCapture,
+      gitCwd,
+      interactionMode,
+      isLocalDraftThread,
+      resetSendPhase,
+      runtimeMode,
+      setThreadError,
+    ],
   );
 
   const queueCurrentComposerTurn = useCallback(
@@ -5199,7 +5351,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     const submission = await buildComposerTurnSubmission({ allowStandaloneCommands: true });
-    if (!submission || submission.kind !== "message") {
+    if (!submission) {
+      return;
+    }
+    if (submission.kind === "bang-command") {
+      await runStandaloneBangCommand(submission.commandText);
+      return;
+    }
+    if (submission.kind !== "message") {
       return;
     }
     const {
@@ -6721,6 +6880,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                   completionSummary={completionSummary}
                   turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                  workLogTurnDiffSummaryByTurnId={workLogTurnDiffSummaryByTurnId}
                   nowIso={nowIso}
                   expandedWorkGroups={expandedWorkGroups}
                   onToggleWorkGroup={onToggleWorkGroup}
@@ -6763,10 +6923,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
               isGitRepo ? "pb-1" : "pb-3 sm:pb-4",
             )}
           >
+            {composerActivitySubtext ? (
+              <div className="mx-auto mb-1 w-full max-w-5xl px-1.5 text-[11px] text-muted-foreground/75 sm:px-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate">{composerActivitySubtext}</span>
+                  {composerActivityElapsed ? (
+                    <span className="shrink-0 text-muted-foreground/60">{composerActivityElapsed}</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <form
               ref={composerFormRef}
               onSubmit={onSend}
-              className="mx-auto w-full min-w-0 max-w-3xl"
+              className="mx-auto w-full min-w-0 max-w-5xl"
               data-chat-composer-form="true"
             >
               <div
@@ -8203,7 +8373,7 @@ const ThreadErrorBanner = memo(function ThreadErrorBanner({
 }) {
   if (!error) return null;
   return (
-    <div className="pt-3 mx-auto max-w-3xl">
+    <div className="pt-3 mx-auto max-w-5xl">
       <Alert variant="error">
         <CircleAlertIcon />
         <AlertDescription className="line-clamp-3" title={error}>
@@ -8281,7 +8451,7 @@ const ThreadFeatureBanners = memo(function ThreadFeatureBanners(props: {
   return (
     <>
       {props.share && props.shareUrl ? (
-        <div className="mx-auto max-w-3xl pt-3">
+        <div className="mx-auto max-w-5xl pt-3">
           <Alert variant="info">
             <Share2Icon />
             <AlertTitle>Shared snapshot available</AlertTitle>
@@ -8307,7 +8477,7 @@ const ThreadFeatureBanners = memo(function ThreadFeatureBanners(props: {
       ) : null}
 
       {props.latestResumeContext ? (
-        <div className="mx-auto max-w-3xl pt-3">
+        <div className="mx-auto max-w-5xl pt-3">
           <Alert variant="info">
             <RefreshCwIcon />
             <AlertTitle>
@@ -8333,7 +8503,7 @@ const ThreadFeatureBanners = memo(function ThreadFeatureBanners(props: {
       ) : null}
 
       {props.latestAppliedSkills.length > 0 ? (
-        <div className="mx-auto max-w-3xl pt-3">
+        <div className="mx-auto max-w-5xl pt-3">
           <Alert variant="info">
             <ZapIcon />
             <AlertTitle>Skills applied on the latest turn</AlertTitle>
@@ -8351,7 +8521,7 @@ const ThreadFeatureBanners = memo(function ThreadFeatureBanners(props: {
       ) : null}
 
       {props.redoDepth > 0 ? (
-        <div className="mx-auto max-w-3xl pt-3">
+        <div className="mx-auto max-w-5xl pt-3">
           <Alert variant="warning">
             <RotateCwIcon />
             <AlertTitle>Redo available</AlertTitle>
@@ -8396,7 +8566,7 @@ const ThreadModelRerouteBanner = memo(function ThreadModelRerouteBanner({
       : `CUT3 retried this turn from ${fromModelLabel} to ${toModelLabel}.`;
 
   return (
-    <div className="mx-auto max-w-3xl pt-3">
+    <div className="mx-auto max-w-5xl pt-3">
       <Alert variant="warning">
         <CircleAlertIcon />
         <AlertTitle>OpenRouter fell back to a different free model</AlertTitle>
@@ -8425,7 +8595,7 @@ const ProviderHealthBanner = memo(function ProviderHealthBanner({
   const defaultMessage = getDefaultProviderStatusMessage(status);
 
   return (
-    <div className="pt-3 mx-auto max-w-3xl">
+    <div className="pt-3 mx-auto max-w-5xl">
       <Alert variant={status.status === "error" ? "error" : "warning"}>
         <CircleAlertIcon />
         <AlertTitle>{getProviderStatusTitle(status.provider)}</AlertTitle>
@@ -10262,7 +10432,8 @@ const OpenInPicker = memo(function OpenInPicker({
   openInCwd: string | null;
 }) {
   const [lastEditor, setLastEditor] = useState<EditorId>(() => {
-    const stored = localStorage.getItem(LAST_EDITOR_KEY);
+    const stored =
+      localStorage.getItem(LAST_EDITOR_KEY) ?? localStorage.getItem(LEGACY_LAST_EDITOR_KEY);
     return EDITORS.some((e) => e.id === stored) ? (stored as EditorId) : EDITORS[0].id;
   });
 
@@ -10318,6 +10489,7 @@ const OpenInPicker = memo(function OpenInPicker({
       if (!editor) return;
       void api.shell.openInEditor(openInCwd, editor);
       localStorage.setItem(LAST_EDITOR_KEY, editor);
+      localStorage.removeItem(LEGACY_LAST_EDITOR_KEY);
       setLastEditor(editor);
     },
     [effectiveEditor, openInCwd, setLastEditor],

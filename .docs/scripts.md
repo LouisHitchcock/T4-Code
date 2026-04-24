@@ -19,6 +19,7 @@
 - `bun run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.
 - `bun run dist:desktop:linux` — Builds a Linux AppImage into `./release`.
 - `bun run dist:desktop:win` — Builds a Windows NSIS installer into `./release`.
+- `build-windows-installer.bat` — Windows-only repo-root wrapper for `bun run dist:desktop:win`; double-click it or run it from `cmd`/PowerShell to build the desktop app plus installer into `.\release`.
 - `bun run release:checksums` — Generates `./release/SHA256SUMS` for the current release assets.
 
 ## Desktop packaging notes

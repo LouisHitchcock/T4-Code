@@ -18,6 +18,33 @@ import { Config, Data, Effect, FileSystem, Layer, Logger, Option, Path, Schema }
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+function syncBrandedEnv(primaryKey: string, legacyKey: string): void {
+  const primaryValue = process.env[primaryKey];
+  const legacyValue = process.env[legacyKey];
+  if (primaryValue === undefined && legacyValue !== undefined) {
+    process.env[primaryKey] = legacyValue;
+  }
+  if (legacyValue === undefined && primaryValue !== undefined) {
+    process.env[legacyKey] = primaryValue;
+  }
+}
+
+(
+  [
+    ["T4CODE_DESKTOP_PLATFORM", "CUT3_DESKTOP_PLATFORM"],
+    ["T4CODE_DESKTOP_TARGET", "CUT3_DESKTOP_TARGET"],
+    ["T4CODE_DESKTOP_ARCH", "CUT3_DESKTOP_ARCH"],
+    ["T4CODE_DESKTOP_VERSION", "CUT3_DESKTOP_VERSION"],
+    ["T4CODE_DESKTOP_OUTPUT_DIR", "CUT3_DESKTOP_OUTPUT_DIR"],
+    ["T4CODE_DESKTOP_SKIP_BUILD", "CUT3_DESKTOP_SKIP_BUILD"],
+    ["T4CODE_DESKTOP_KEEP_STAGE", "CUT3_DESKTOP_KEEP_STAGE"],
+    ["T4CODE_DESKTOP_SIGNED", "CUT3_DESKTOP_SIGNED"],
+    ["T4CODE_DESKTOP_VERBOSE", "CUT3_DESKTOP_VERBOSE"],
+    ["T4CODE_DESKTOP_UPDATE_REPOSITORY", "CUT3_DESKTOP_UPDATE_REPOSITORY"],
+    ["T4CODE_DESKTOP_UPDATE_GITHUB_TOKEN", "CUT3_DESKTOP_UPDATE_GITHUB_TOKEN"],
+  ] as const
+).forEach(([primaryKey, legacyKey]) => syncBrandedEnv(primaryKey, legacyKey));
+
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
 
@@ -176,6 +203,7 @@ interface StagePackageJson {
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
+  readonly trustedDependencies: ReadonlyArray<string>;
   readonly devDependencies: {
     readonly electron: string;
   };
@@ -196,15 +224,15 @@ const AzureTrustedSigningOptionsConfig = Config.all({
 });
 
 const BuildEnvConfig = Config.all({
-  platform: Config.schema(BuildPlatform, "CUT3_DESKTOP_PLATFORM").pipe(Config.option),
-  target: Config.string("CUT3_DESKTOP_TARGET").pipe(Config.option),
-  arch: Config.schema(BuildArch, "CUT3_DESKTOP_ARCH").pipe(Config.option),
-  version: Config.string("CUT3_DESKTOP_VERSION").pipe(Config.option),
-  outputDir: Config.string("CUT3_DESKTOP_OUTPUT_DIR").pipe(Config.option),
-  skipBuild: Config.boolean("CUT3_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
-  keepStage: Config.boolean("CUT3_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
-  signed: Config.boolean("CUT3_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
-  verbose: Config.boolean("CUT3_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
+  platform: Config.schema(BuildPlatform, "T4CODE_DESKTOP_PLATFORM").pipe(Config.option),
+  target: Config.string("T4CODE_DESKTOP_TARGET").pipe(Config.option),
+  arch: Config.schema(BuildArch, "T4CODE_DESKTOP_ARCH").pipe(Config.option),
+  version: Config.string("T4CODE_DESKTOP_VERSION").pipe(Config.option),
+  outputDir: Config.string("T4CODE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
+  skipBuild: Config.boolean("T4CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
+  keepStage: Config.boolean("T4CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
+  signed: Config.boolean("T4CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
+  verbose: Config.boolean("T4CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
 });
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
@@ -318,7 +346,7 @@ function stageMacIcons(stageResourcesDir: string, verbose: boolean) {
     }
 
     const tmpRoot = yield* fs.makeTempDirectoryScoped({
-      prefix: "cut3-icon-build-",
+      prefix: "t4code-icon-build-",
     });
 
     const iconPngPath = path.join(stageResourcesDir, "icon.png");
@@ -427,6 +455,7 @@ function resolveGitHubPublishConfig():
     }
   | undefined {
   const rawRepo =
+    process.env.T4CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
     process.env.CUT3_DESKTOP_UPDATE_REPOSITORY?.trim() ||
     process.env.GITHUB_REPOSITORY?.trim() ||
     "";
@@ -452,14 +481,16 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 ) {
   const artifactName =
     platform === "mac"
-      ? "CUT3-macOS-${version}-${arch}.${ext}"
+      ? "T4Code-macOS-${version}-${arch}.${ext}"
       : platform === "linux"
-        ? "CUT3-linux-${version}-${arch}.${ext}"
-        : "CUT3-windows-${version}-${arch}.${ext}";
+        ? "T4Code-linux-${version}-${arch}.${ext}"
+        : "T4Code-windows-${version}-${arch}.${ext}";
   const buildConfig: Record<string, unknown> = {
     appId,
     productName,
     artifactName,
+    npmRebuild: false,
+    nodeGypRebuild: false,
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -482,7 +513,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: [target],
       icon: "icon.png",
       category: "Development",
-      executableName: "cut3",
+      executableName: "t4code",
       desktop: {
         entry: {
           StartupWMClass: productName,
@@ -497,6 +528,10 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: [target],
       icon: "icon.ico",
     };
+    if (!signed) {
+      winConfig.signAndEditExecutable = false;
+      winConfig.verifyUpdateCodeSignature = false;
+    }
     if (signed) {
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
     }
@@ -583,7 +618,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const commitHash = resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
-    prefix: `cut3-desktop-${options.platform}-stage-`,
+    prefix: `t4code-desktop-${options.platform}-stage-`,
   });
 
   const stageAppDir = path.join(stageRoot, "app");
@@ -637,12 +672,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
   const stagePackageJson: StagePackageJson = {
-    name: "cut3-desktop",
+    name: "t4code-desktop",
     version: appVersion,
     buildVersion: appVersion,
     cut3CommitHash: commitHash,
     private: true,
-    description: "CUT3 desktop build",
+    description: "T4Code desktop build",
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
@@ -656,6 +691,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ...resolvedServerDependencies,
       ...resolvedDesktopRuntimeDependencies,
     },
+    trustedDependencies: ["@homebridge/node-pty-prebuilt-multiarch", "msgpackr-extract"],
     devDependencies: {
       electron: electronVersion,
     },
@@ -748,49 +784,49 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
 const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   platform: Flag.choice("platform", BuildPlatform.literals).pipe(
-    Flag.withDescription("Build platform (env: CUT3_DESKTOP_PLATFORM)."),
+    Flag.withDescription("Build platform (env: T4CODE_DESKTOP_PLATFORM)."),
     Flag.optional,
   ),
   target: Flag.string("target").pipe(
     Flag.withDescription(
-      "Artifact target, for example dmg/AppImage/nsis (env: CUT3_DESKTOP_TARGET).",
+      "Artifact target, for example dmg/AppImage/nsis (env: T4CODE_DESKTOP_TARGET).",
     ),
     Flag.optional,
   ),
   arch: Flag.choice("arch", BuildArch.literals).pipe(
-    Flag.withDescription("Build arch, for example arm64/x64/universal (env: CUT3_DESKTOP_ARCH)."),
+    Flag.withDescription("Build arch, for example arm64/x64/universal (env: T4CODE_DESKTOP_ARCH)."),
     Flag.optional,
   ),
   buildVersion: Flag.string("build-version").pipe(
-    Flag.withDescription("Artifact version metadata (env: CUT3_DESKTOP_VERSION)."),
+    Flag.withDescription("Artifact version metadata (env: T4CODE_DESKTOP_VERSION)."),
     Flag.optional,
   ),
   outputDir: Flag.string("output-dir").pipe(
-    Flag.withDescription("Output directory for artifacts (env: CUT3_DESKTOP_OUTPUT_DIR)."),
+    Flag.withDescription("Output directory for artifacts (env: T4CODE_DESKTOP_OUTPUT_DIR)."),
     Flag.optional,
   ),
   skipBuild: Flag.boolean("skip-build").pipe(
     Flag.withDescription(
-      "Skip `bun run build:desktop` and use existing dist artifacts (env: CUT3_DESKTOP_SKIP_BUILD).",
+      "Skip `bun run build:desktop` and use existing dist artifacts (env: T4CODE_DESKTOP_SKIP_BUILD).",
     ),
     Flag.optional,
   ),
   keepStage: Flag.boolean("keep-stage").pipe(
-    Flag.withDescription("Keep temporary staging files (env: CUT3_DESKTOP_KEEP_STAGE)."),
+    Flag.withDescription("Keep temporary staging files (env: T4CODE_DESKTOP_KEEP_STAGE)."),
     Flag.optional,
   ),
   signed: Flag.boolean("signed").pipe(
     Flag.withDescription(
-      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: CUT3_DESKTOP_SIGNED).",
+      "Enable signing/notarization discovery; Windows uses Azure Trusted Signing (env: T4CODE_DESKTOP_SIGNED).",
     ),
     Flag.optional,
   ),
   verbose: Flag.boolean("verbose").pipe(
-    Flag.withDescription("Stream subprocess stdout (env: CUT3_DESKTOP_VERBOSE)."),
+    Flag.withDescription("Stream subprocess stdout (env: T4CODE_DESKTOP_VERBOSE)."),
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for CUT3."),
+  Command.withDescription("Build a desktop artifact for T4Code."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

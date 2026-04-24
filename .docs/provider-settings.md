@@ -190,6 +190,7 @@ The composer also supports lightweight image input:
 The composer now surfaces repo-owned workspace behavior directly:
 
 - CUT3 ships built-in slash commands for common thread actions, including `/new`, `/compact`, `/share`, `/unshare`, `/undo`, `/redo`, `/export`, `/details`, `/init`, `/plan`, `/default`, `/model`, and `/mcp` when the active provider supports MCP.
+- CUT3 also accepts standalone `!` commands in the composer. Inputs like `!pnpm lint` run locally in a hidden thread-scoped terminal using the active thread workspace cwd/env and show up as durable command rows in the conversation.
 - CUT3 checks the active workspace root for `AGENTS.md` and shows whether it is currently available.
 - `/init` drafts or updates `AGENTS.md` using the current workspace shape, then saves it through the same guarded project-write path used by other workspace actions.
 - CUT3 loads repo-local slash-command templates from `.cut3/commands/*.md`.
@@ -206,6 +207,7 @@ When a turn is already running, the composer exposes follow-up controls instead 
 - `Enter` uses the currently selected Queue/Steer mode while a turn is running
 - `Cmd/Ctrl+Enter` uses the opposite Queue/Steer mode for that one follow-up
 - queued follow-ups can be reordered, retried, or removed from the inline queue panel
+- The activity strip above the timeline keeps the current working/idle state visible even before the next full assistant message arrives, including waiting-for-approval/input states and the latest command/file activity context.
 
 ### Repo-local skills
 

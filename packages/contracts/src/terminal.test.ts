@@ -6,6 +6,9 @@ import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
+  TerminalExecEvent,
+  TerminalExecInput,
+  TerminalExecResult,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalSessionSnapshot,
@@ -142,6 +145,68 @@ describe("TerminalResizeInput", () => {
     ).toBe(true);
   });
 });
+describe("TerminalExecEvent", () => {
+  it("accepts started events", () => {
+    expect(
+      decodes(TerminalExecEvent, {
+        type: "exec.started",
+        threadId: "thread-1",
+        terminalId: DEFAULT_TERMINAL_ID,
+        commandId: "command-1",
+        createdAt: new Date().toISOString(),
+        mode: "wait",
+        command: "echo",
+        args: ["hello"],
+        cwd: "/tmp/project",
+        metadata: {
+          isReadOnly: true,
+          isRisky: false,
+          usesPager: false,
+          reason: "test",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts completed events", () => {
+    expect(
+      decodes(TerminalExecEvent, {
+        type: "exec.completed",
+        threadId: "thread-1",
+        terminalId: DEFAULT_TERMINAL_ID,
+        commandId: "command-1",
+        createdAt: new Date().toISOString(),
+        mode: "wait",
+        result: {
+          threadId: "thread-1",
+          terminalId: DEFAULT_TERMINAL_ID,
+          commandId: "command-1",
+          mode: "wait",
+          command: "echo",
+          args: ["hello"],
+          cwd: "/tmp/project",
+          startedAt: new Date().toISOString(),
+          metadata: {
+            isReadOnly: true,
+            isRisky: false,
+            usesPager: false,
+            reason: "test",
+          },
+          status: "succeeded",
+          completedAt: new Date().toISOString(),
+          durationMs: 5,
+          exitCode: 0,
+          exitSignal: null,
+          timedOut: false,
+          stdout: "hello\n",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        },
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("TerminalClearInput", () => {
   it("defaults terminal id", () => {
@@ -162,6 +227,47 @@ describe("TerminalCloseInput", () => {
     ).toBe(true);
   });
 });
+describe("TerminalExecInput", () => {
+  it("defaults mode and metadata flags", () => {
+    const parsed = decodeSync(TerminalExecInput, {
+      threadId: "thread-1",
+      cwd: "/tmp/project",
+      command: "echo",
+    });
+    expect(parsed.terminalId).toBe(DEFAULT_TERMINAL_ID);
+    expect(parsed.mode).toBe("wait");
+    expect(parsed.isReadOnly ?? false).toBe(false);
+    expect(parsed.isRisky ?? false).toBe(false);
+    expect(parsed.usesPager ?? false).toBe(false);
+    expect(parsed.approveRiskyExecution ?? false).toBe(false);
+  });
+
+  it("accepts interact mode input", () => {
+    expect(
+      decodes(TerminalExecInput, {
+        threadId: "thread-1",
+        terminalId: "terminal-2",
+        cwd: "/tmp/project",
+        mode: "interact",
+        command: "bash",
+        args: ["-lc", "echo hi"],
+        reason: "interactive test",
+        timeoutMs: 30_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects invalid timeout bounds", () => {
+    expect(
+      decodes(TerminalExecInput, {
+        threadId: "thread-1",
+        cwd: "/tmp/project",
+        command: "echo",
+        timeoutMs: 0,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("TerminalSessionSnapshot", () => {
   it("accepts running snapshots", () => {
@@ -176,6 +282,71 @@ describe("TerminalSessionSnapshot", () => {
         exitCode: null,
         exitSignal: null,
         updatedAt: new Date().toISOString(),
+      }),
+    ).toBe(true);
+  });
+});
+describe("TerminalExecResult", () => {
+  it("accepts wait exec results", () => {
+    expect(
+      decodes(TerminalExecResult, {
+        threadId: "thread-1",
+        terminalId: DEFAULT_TERMINAL_ID,
+        commandId: "command-1",
+        mode: "wait",
+        command: "echo",
+        args: ["hello"],
+        cwd: "/tmp/project",
+        startedAt: new Date().toISOString(),
+        metadata: {
+          isReadOnly: true,
+          isRisky: false,
+          usesPager: false,
+          reason: "test",
+        },
+        status: "succeeded",
+        completedAt: new Date().toISOString(),
+        durationMs: 5,
+        exitCode: 0,
+        exitSignal: null,
+        timedOut: false,
+        stdout: "hello\n",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts interact exec results", () => {
+    expect(
+      decodes(TerminalExecResult, {
+        threadId: "thread-1",
+        terminalId: DEFAULT_TERMINAL_ID,
+        commandId: "command-2",
+        mode: "interact",
+        command: "bash",
+        args: ["-lc", "echo hi"],
+        cwd: "/tmp/project",
+        startedAt: new Date().toISOString(),
+        metadata: {
+          isReadOnly: false,
+          isRisky: false,
+          usesPager: false,
+          reason: null,
+        },
+        status: "running",
+        snapshot: {
+          threadId: "thread-1",
+          terminalId: DEFAULT_TERMINAL_ID,
+          cwd: "/tmp/project",
+          status: "running",
+          pid: 4321,
+          history: "",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: new Date().toISOString(),
+        },
       }),
     ).toBe(true);
   });

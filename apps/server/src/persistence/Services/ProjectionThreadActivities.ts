@@ -80,4 +80,4 @@ export interface ProjectionThreadActivityRepositoryShape {
 export class ProjectionThreadActivityRepository extends ServiceMap.Service<
   ProjectionThreadActivityRepository,
   ProjectionThreadActivityRepositoryShape
->()("cut3/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}
+>()("t4code/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}

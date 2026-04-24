@@ -3,6 +3,7 @@ import {
   computeMessageDurationStart,
   deriveTimelineWorkEntryVisualState,
   formatWorkingTimer,
+  isCommandWorkEntry,
   normalizeCompactToolLabel,
   shouldAnimateAssistantResponseAfterTool,
 } from "./MessagesTimeline.logic";
@@ -230,12 +231,48 @@ describe("deriveTimelineWorkEntryVisualState", () => {
   });
 });
 
+describe("isCommandWorkEntry", () => {
+  it("treats command execution item types as command entries", () => {
+    expect(
+      isCommandWorkEntry({
+        itemType: "command_execution",
+      }),
+    ).toBe(true);
+  });
+
+  it("treats command approvals with a command payload as command entries", () => {
+    expect(
+      isCommandWorkEntry({
+        requestKind: "command",
+        command: "bun run lint",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat non-command work entries as command entries", () => {
+    expect(
+      isCommandWorkEntry({
+        itemType: "file_change",
+        requestKind: "file-change",
+      }),
+    ).toBe(false);
+  });
+});
 describe("shouldAnimateAssistantResponseAfterTool", () => {
   it("animates assistant responses that follow work rows", () => {
     expect(
       shouldAnimateAssistantResponseAfterTool({
         messageRole: "assistant",
         previousRowKind: "work",
+      }),
+    ).toBe(true);
+  });
+
+  it("animates assistant responses that follow command work rows", () => {
+    expect(
+      shouldAnimateAssistantResponseAfterTool({
+        messageRole: "assistant",
+        previousRowKind: "command-work",
       }),
     ).toBe(true);
   });

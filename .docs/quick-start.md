@@ -40,6 +40,7 @@ If you want to cut your own desktop build instead of waiting for somebody else t
   - macOS Intel: `bun run dist:desktop:dmg:x64`
   - Linux x64: `bun run dist:desktop:linux`
   - Windows x64: `bun run dist:desktop:win`
+  - Windows convenience wrapper: `build-windows-installer.bat`
 - Find the output in `./release`.
 
 Use the matching host OS when possible. Cross-platform packaging is not the default workflow for this repo.
@@ -57,6 +58,8 @@ Use the matching host OS when possible. Cross-platform packaging is not the defa
 - Pick `Full access` or `Supervised` in the toolbar depending on whether you want direct execution or approval-gated actions.
 - Switch between `Chat` and `Plan` when you want plan-first collaboration with the plan sidebar.
 - While a turn is running, use the composer Queue/Steer controls to line up the next follow-up. `Enter` uses the currently selected follow-up mode, and `Cmd/Ctrl+Enter` uses the opposite mode for that one message.
+- Use a leading `!` for standalone local terminal commands such as `!bun run test`. CUT3 runs them in a hidden thread-scoped terminal, records started/completed command rows in the conversation, and keeps those rows visible even if generic tool details are hidden.
+- Watch the activity strip above the conversation for live status. It shows whether CUT3 is idle, sending, waiting for approval/input, or actively running the latest command/file/web action.
 - Use the thread actions menu or composer slash commands such as `/share`, `/unshare`, `/compact`, `/undo`, `/redo`, `/export`, and `/details` to manage the current thread. Shared links open a read-only viewer that can import the snapshot into another local project.
 - Use the thread header `Undo` and `Redo` controls, or the matching slash commands, to move through recent restore snapshots after destructive changes.
 - Use `Fork thread here` on a message to branch from that point, and use the diff panel to fork from a completed checkpoint.

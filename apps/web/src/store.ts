@@ -25,8 +25,9 @@ export interface AppState {
   threadsHydrated: boolean;
 }
 
-const PERSISTED_STATE_KEY = "cut3:renderer-state:v8";
+const PERSISTED_STATE_KEY = "t4code:renderer-state:v8";
 const LEGACY_PERSISTED_STATE_KEYS = [
+  "cut3:renderer-state:v8",
   "cut3:renderer-state:v7",
   "cut3:renderer-state:v6",
   "cut3:renderer-state:v5",

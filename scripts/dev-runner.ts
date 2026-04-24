@@ -19,6 +19,31 @@ const MAX_PORT = 65535;
 const DEFAULT_LOOPBACK_HOST = "127.0.0.1";
 const DEV_RUNNER_SELECTION_FILE = ".dev-runner-selection.json";
 
+function syncBrandedEnv(primaryKey: string, legacyKey: string): void {
+  const primaryValue = process.env[primaryKey];
+  const legacyValue = process.env[legacyKey];
+  if (primaryValue === undefined && legacyValue !== undefined) {
+    process.env[primaryKey] = legacyValue;
+  }
+  if (legacyValue === undefined && primaryValue !== undefined) {
+    process.env[legacyKey] = primaryValue;
+  }
+}
+
+(
+  [
+    ["T4CODE_PORT_OFFSET", "CUT3_PORT_OFFSET"],
+    ["T4CODE_DEV_INSTANCE", "CUT3_DEV_INSTANCE"],
+    ["T4CODE_STATE_DIR", "CUT3_STATE_DIR"],
+    ["T4CODE_AUTH_TOKEN", "CUT3_AUTH_TOKEN"],
+    ["T4CODE_NO_BROWSER", "CUT3_NO_BROWSER"],
+    ["T4CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD", "CUT3_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"],
+    ["T4CODE_LOG_WS_EVENTS", "CUT3_LOG_WS_EVENTS"],
+    ["T4CODE_HOST", "CUT3_HOST"],
+    ["T4CODE_PORT", "CUT3_PORT"],
+  ] as const
+).forEach(([primaryKey, legacyKey]) => syncBrandedEnv(primaryKey, legacyKey));
+
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3", "dev"),
 );
@@ -30,10 +55,10 @@ const MODE_ARGS = {
     "--ui=tui",
     "--filter=@t3tools/contracts",
     "--filter=@t3tools/web",
-    "--filter=cut3",
+    "--filter=t4code",
     "--parallel",
   ],
-  "dev:server": ["run", "dev", "--filter=cut3"],
+  "dev:server": ["run", "dev", "--filter=t4code"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
   "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
@@ -86,8 +111,8 @@ const optionalUrlConfig = (name: string): Config.Config<URL | undefined> =>
   );
 
 const OffsetConfig = Config.all({
-  portOffset: optionalIntegerConfig("CUT3_PORT_OFFSET"),
-  devInstance: optionalStringConfig("CUT3_DEV_INSTANCE"),
+  portOffset: optionalIntegerConfig("T4CODE_PORT_OFFSET"),
+  devInstance: optionalStringConfig("T4CODE_DEV_INSTANCE"),
 });
 
 export function resolveOffset(config: {
@@ -96,11 +121,11 @@ export function resolveOffset(config: {
 }): { readonly offset: number; readonly source: string } {
   if (config.portOffset !== undefined) {
     if (config.portOffset < 0) {
-      throw new Error(`Invalid CUT3_PORT_OFFSET: ${config.portOffset}`);
+      throw new Error(`Invalid T4CODE_PORT_OFFSET: ${config.portOffset}`);
     }
     return {
       offset: config.portOffset,
-      source: `CUT3_PORT_OFFSET=${config.portOffset}`,
+      source: `T4CODE_PORT_OFFSET=${config.portOffset}`,
     };
   }
 
@@ -110,11 +135,11 @@ export function resolveOffset(config: {
   }
 
   if (/^\d+$/.test(seed)) {
-    return { offset: Number(seed), source: `numeric CUT3_DEV_INSTANCE=${seed}` };
+    return { offset: Number(seed), source: `numeric T4CODE_DEV_INSTANCE=${seed}` };
   }
 
   const offset = ((Hash.string(seed) >>> 0) % MAX_HASH_OFFSET) + 1;
-  return { offset, source: `hashed CUT3_DEV_INSTANCE=${seed}` };
+  return { offset, source: `hashed T4CODE_DEV_INSTANCE=${seed}` };
 }
 
 function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, never, Path.Path> {
@@ -288,49 +313,64 @@ export function createDevRunnerEnv({
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
+      T4CODE_PORT: String(serverPort),
       CUT3_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
       VITE_WS_URL: withWsAuthToken(`ws://${urlHost}:${serverPort}`, authToken),
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://${urlHost}:${webPort}`,
+      T4CODE_STATE_DIR: resolvedStateDir,
       CUT3_STATE_DIR: resolvedStateDir,
     };
 
     if (host !== undefined) {
+      output.T4CODE_HOST = host;
       output.CUT3_HOST = host;
     }
 
     if (authToken !== undefined) {
+      output.T4CODE_AUTH_TOKEN = authToken;
       output.CUT3_AUTH_TOKEN = authToken;
     } else {
+      delete output.T4CODE_AUTH_TOKEN;
       delete output.CUT3_AUTH_TOKEN;
     }
 
     if (noBrowser !== undefined) {
+      output.T4CODE_NO_BROWSER = noBrowser ? "1" : "0";
       output.CUT3_NO_BROWSER = noBrowser ? "1" : "0";
     } else {
+      delete output.T4CODE_NO_BROWSER;
       delete output.CUT3_NO_BROWSER;
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
+      output.T4CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
       output.CUT3_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
     } else {
+      delete output.T4CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
       delete output.CUT3_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
+      output.T4CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
       output.CUT3_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
     } else {
+      delete output.T4CODE_LOG_WS_EVENTS;
       delete output.CUT3_LOG_WS_EVENTS;
     }
 
     if (mode === "dev") {
+      output.T4CODE_MODE = "web";
       output.CUT3_MODE = "web";
+      delete output.T4CODE_DESKTOP_WS_URL;
       delete output.CUT3_DESKTOP_WS_URL;
     }
 
     if (mode === "dev:server" || mode === "dev:web") {
+      output.T4CODE_MODE = "web";
       output.CUT3_MODE = "web";
+      delete output.T4CODE_DESKTOP_WS_URL;
       delete output.CUT3_DESKTOP_WS_URL;
     }
 
@@ -525,7 +565,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       Effect.mapError(
         (cause) =>
           new DevRunnerError({
-            message: "Failed to read CUT3_PORT_OFFSET/CUT3_DEV_INSTANCE configuration.",
+            message: "Failed to read T4CODE_PORT_OFFSET/T4CODE_DEV_INSTANCE configuration.",
             cause,
           }),
       ),
@@ -541,9 +581,9 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     });
 
     const envOverrides = {
-      noBrowser: readOptionalBooleanEnv("CUT3_NO_BROWSER"),
-      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("CUT3_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
-      logWebSocketEvents: readOptionalBooleanEnv("CUT3_LOG_WS_EVENTS"),
+      noBrowser: readOptionalBooleanEnv("T4CODE_NO_BROWSER"),
+      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("T4CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
+      logWebSocketEvents: readOptionalBooleanEnv("T4CODE_LOG_WS_EVENTS"),
     };
 
     const resolvedStateDir = yield* resolveStateDir(input.stateDir);
@@ -609,7 +649,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.CUT3_PORT)} webPort=${String(env.PORT)} stateDir=${String(env.CUT3_STATE_DIR)}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T4CODE_PORT)} webPort=${String(env.PORT)} stateDir=${String(env.T4CODE_STATE_DIR)}`,
     );
 
     if (input.dryRun) {
@@ -658,37 +698,37 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   stateDir: Flag.string("state-dir").pipe(
-    Flag.withDescription("State directory path (forwards to CUT3_STATE_DIR)."),
-    Flag.withFallbackConfig(optionalStringConfig("CUT3_STATE_DIR")),
+    Flag.withDescription("State directory path (forwards to T4CODE_STATE_DIR)."),
+    Flag.withFallbackConfig(optionalStringConfig("T4CODE_STATE_DIR")),
   ),
   authToken: Flag.string("auth-token").pipe(
-    Flag.withDescription("Auth token (forwards to CUT3_AUTH_TOKEN)."),
+    Flag.withDescription("Auth token (forwards to T4CODE_AUTH_TOKEN)."),
     Flag.withAlias("token"),
-    Flag.withFallbackConfig(optionalStringConfig("CUT3_AUTH_TOKEN")),
+    Flag.withFallbackConfig(optionalStringConfig("T4CODE_AUTH_TOKEN")),
   ),
   noBrowser: Flag.boolean("no-browser").pipe(
-    Flag.withDescription("Browser auto-open toggle (equivalent to CUT3_NO_BROWSER)."),
-    Flag.withFallbackConfig(optionalBooleanConfig("CUT3_NO_BROWSER")),
+    Flag.withDescription("Browser auto-open toggle (equivalent to T4CODE_NO_BROWSER)."),
+    Flag.withFallbackConfig(optionalBooleanConfig("T4CODE_NO_BROWSER")),
   ),
   autoBootstrapProjectFromCwd: Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
     Flag.withDescription(
-      "Auto-bootstrap toggle (equivalent to CUT3_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
+      "Auto-bootstrap toggle (equivalent to T4CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
     ),
-    Flag.withFallbackConfig(optionalBooleanConfig("CUT3_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
+    Flag.withFallbackConfig(optionalBooleanConfig("T4CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
   ),
   logWebSocketEvents: Flag.boolean("log-websocket-events").pipe(
-    Flag.withDescription("WebSocket event logging toggle (equivalent to CUT3_LOG_WS_EVENTS)."),
+    Flag.withDescription("WebSocket event logging toggle (equivalent to T4CODE_LOG_WS_EVENTS)."),
     Flag.withAlias("log-ws-events"),
-    Flag.withFallbackConfig(optionalBooleanConfig("CUT3_LOG_WS_EVENTS")),
+    Flag.withFallbackConfig(optionalBooleanConfig("T4CODE_LOG_WS_EVENTS")),
   ),
   host: Flag.string("host").pipe(
-    Flag.withDescription("Server host/interface override (forwards to CUT3_HOST)."),
-    Flag.withFallbackConfig(optionalStringConfig("CUT3_HOST")),
+    Flag.withDescription("Server host/interface override (forwards to T4CODE_HOST)."),
+    Flag.withFallbackConfig(optionalStringConfig("T4CODE_HOST")),
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Server port override (forwards to CUT3_PORT)."),
-    Flag.withFallbackConfig(optionalPortConfig("CUT3_PORT")),
+    Flag.withDescription("Server port override (forwards to T4CODE_PORT)."),
+    Flag.withFallbackConfig(optionalPortConfig("T4CODE_PORT")),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),

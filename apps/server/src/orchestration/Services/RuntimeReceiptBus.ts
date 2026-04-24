@@ -46,4 +46,4 @@ export interface RuntimeReceiptBusShape {
 export class RuntimeReceiptBus extends ServiceMap.Service<
   RuntimeReceiptBus,
   RuntimeReceiptBusShape
->()("cut3/orchestration/Services/RuntimeReceiptBus") {}
+>()("t4code/orchestration/Services/RuntimeReceiptBus") {}

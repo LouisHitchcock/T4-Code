@@ -20,7 +20,8 @@ type ThemeSnapshot = {
   customThemeId: CustomThemeId;
 };
 
-const STORAGE_KEY = "cut3:theme";
+const STORAGE_KEY = "t4code:theme";
+const LEGACY_STORAGE_KEYS = ["cut3:theme"] as const;
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];
@@ -46,7 +47,11 @@ function getStored(): Theme {
     return "system";
   }
 
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  const raw =
+    window.localStorage.getItem(STORAGE_KEY) ??
+    LEGACY_STORAGE_KEYS.map((key) => window.localStorage.getItem(key)).find(
+      (value) => value !== null,
+    );
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return "system";
 }
@@ -180,7 +185,7 @@ function subscribe(listener: () => void): () => void {
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) {
+    if (e.key === STORAGE_KEY || LEGACY_STORAGE_KEYS.includes(e.key as never)) {
       applyTheme(getStored(), getStoredCustomThemeId(), true);
       emitChange();
     }
@@ -219,6 +224,9 @@ export function useTheme() {
     }
 
     window.localStorage.setItem(STORAGE_KEY, next);
+    for (const legacyKey of LEGACY_STORAGE_KEYS) {
+      window.localStorage.removeItem(legacyKey);
+    }
     applyTheme(next, getStoredCustomThemeId(), true);
     emitChange();
   }, []);

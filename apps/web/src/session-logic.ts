@@ -76,6 +76,7 @@ export function getProviderPickerKindForSelection(
 
 export interface WorkLogEntry {
   id: string;
+  turnId?: TurnId;
   createdAt: string;
   label: string;
   detail?: string;
@@ -85,6 +86,35 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  alwaysVisible?: boolean;
+  itemId?: string;
+  activityKind?: string;
+}
+
+export type ActiveThinkingContextKind =
+  | "idle"
+  | "connecting"
+  | "preparing-worktree"
+  | "sending-turn"
+  | "thinking"
+  | "tool"
+  | "waiting-approval"
+  | "waiting-input"
+  | "reverting-checkpoint";
+
+export type SendPhaseContext = "idle" | "preparing-worktree" | "sending-turn";
+
+export interface ActiveThinkingContext {
+  kind: ActiveThinkingContextKind;
+  live: boolean;
+  statusLabel: string;
+  headline: string;
+  detail?: string;
+  command?: string;
+  changedFiles?: ReadonlyArray<string>;
+  itemType?: ToolLifecycleItemType;
+  tone: WorkLogEntry["tone"];
+  startedAt: string | null;
 }
 
 export interface PendingApproval {
@@ -862,10 +892,25 @@ export function deriveThreadTasks(
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
+  options: {
+    includeStreamingCommandOutput?: boolean;
+  } = {},
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   return ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter((activity) => {
+      if (!latestTurnId) {
+        return true;
+      }
+      const payload =
+        activity.payload && typeof activity.payload === "object"
+          ? (activity.payload as Record<string, unknown>)
+          : null;
+      return activity.turnId === latestTurnId || isAlwaysVisibleWorkLogActivity(activity, payload);
+    })
+    .filter(
+      (activity) => options.includeStreamingCommandOutput || activity.kind !== "command.output.streaming",
+    )
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
@@ -874,22 +919,31 @@ export function deriveWorkLogEntries(
         activity.payload && typeof activity.payload === "object"
           ? (activity.payload as Record<string, unknown>)
           : null;
+      const alwaysVisible = isAlwaysVisibleWorkLogActivity(activity, payload);
       const command = extractToolCommand(payload);
       const changedFiles = extractChangedFiles(payload);
       const title = extractToolTitle(payload);
+      const itemType = extractWorkLogItemType(payload);
+      const requestKind = extractWorkLogRequestKind(payload);
+      const itemId = extractWorkLogItemId(payload);
       const entry: WorkLogEntry = {
         id: activity.id,
+        ...(activity.turnId ? { turnId: activity.turnId } : {}),
         createdAt: activity.createdAt,
         label: activity.summary,
         tone: activity.tone === "approval" ? "info" : activity.tone,
+        activityKind: activity.kind,
       };
-      const itemType = extractWorkLogItemType(payload);
-      const requestKind = extractWorkLogRequestKind(payload);
-      if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
-        const detail = stripTrailingExitCode(payload.detail).output;
-        if (detail) {
-          entry.detail = detail;
-        }
+      if (alwaysVisible) {
+        entry.alwaysVisible = true;
+      }
+      const detail = extractWorkLogDetail({
+        payload,
+        itemType,
+        command,
+      });
+      if (detail) {
+        entry.detail = detail;
       }
       if (command) {
         entry.command = command;
@@ -906,8 +960,18 @@ export function deriveWorkLogEntries(
       if (requestKind) {
         entry.requestKind = requestKind;
       }
+      if (itemId) {
+        entry.itemId = itemId;
+      }
       return entry;
     });
+}
+
+function isAlwaysVisibleWorkLogActivity(
+  activity: OrchestrationThreadActivity,
+  _payload: Record<string, unknown> | null,
+): boolean {
+  return activity.kind.startsWith("terminal.command.");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -954,6 +1018,84 @@ function extractToolTitle(payload: Record<string, unknown> | null): string | nul
   return asTrimmedString(payload?.title);
 }
 
+function flattenTextValue(value: unknown, depth = 0): string | null {
+  if (depth > 4) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => flattenTextValue(entry, depth + 1))
+      .filter((entry): entry is string => entry !== null);
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const candidates = [
+    flattenTextValue(record.text, depth + 1),
+    flattenTextValue(record.output, depth + 1),
+    flattenTextValue(record.stdout, depth + 1),
+    flattenTextValue(record.stderr, depth + 1),
+    flattenTextValue(record.content, depth + 1),
+    flattenTextValue(record.message, depth + 1),
+  ];
+  return candidates.find((candidate) => candidate !== null) ?? null;
+}
+
+function normalizeWorkLogDetail(value: string | null): string | null {
+  if (!value) return null;
+  return stripTrailingExitCode(value).output;
+}
+
+function extractCommandOutputDetail(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const result = asRecord(item?.result);
+  const combinedStdStreams = [flattenTextValue(result?.stdout), flattenTextValue(result?.stderr)]
+    .filter((entry): entry is string => entry !== null)
+    .join("\n");
+  const candidates = [
+    flattenTextValue(result?.output),
+    flattenTextValue(result?.content),
+    flattenTextValue(result?.text),
+    combinedStdStreams.length > 0 ? combinedStdStreams : null,
+    flattenTextValue(data?.output),
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeWorkLogDetail(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function extractWorkLogDetail(input: {
+  payload: Record<string, unknown> | null;
+  itemType: WorkLogEntry["itemType"] | undefined;
+  command: string | null;
+}): string | null {
+  const commandOutput =
+    input.itemType === "command_execution" ? extractCommandOutputDetail(input.payload) : null;
+  const payloadDetail =
+    input.payload && typeof input.payload.detail === "string" && input.payload.detail.length > 0
+      ? normalizeWorkLogDetail(input.payload.detail)
+      : null;
+  const detail = commandOutput ?? payloadDetail;
+  if (!detail) {
+    return null;
+  }
+  if (input.command && detail.trim() === input.command.trim()) {
+    return null;
+  }
+  return detail;
+}
+
 function stripTrailingExitCode(value: string): {
   output: string | null;
   exitCode?: number | undefined;
@@ -995,6 +1137,15 @@ function extractWorkLogRequestKind(
     return payload.requestKind;
   }
   return requestKindFromRequestType(payload?.requestType) ?? undefined;
+}
+function extractWorkLogItemId(payload: Record<string, unknown> | null): string | null {
+  const directItemId = asTrimmedString(payload?.itemId);
+  if (directItemId) {
+    return directItemId;
+  }
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  return asTrimmedString(item?.id);
 }
 
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
@@ -1112,6 +1263,219 @@ export function deriveTimelineEntries(
   return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
+}
+
+export function deriveActiveThinkingContext(input: {
+  phase: SessionPhase;
+  sendPhase: SendPhaseContext;
+  isRevertingCheckpoint: boolean;
+  activeWorkStartedAt: string | null;
+  workEntries: ReadonlyArray<WorkLogEntry>;
+  pendingApproval: PendingApproval | null;
+  pendingUserInput: PendingUserInput | null;
+}): ActiveThinkingContext {
+  if (input.isRevertingCheckpoint) {
+    return {
+      kind: "reverting-checkpoint",
+      live: true,
+      statusLabel: "Working",
+      headline: "Reverting to checkpoint",
+      tone: "info",
+      startedAt: input.activeWorkStartedAt,
+    };
+  }
+
+  if (input.pendingApproval) {
+    return {
+      kind: "waiting-approval",
+      live: true,
+      statusLabel: "Waiting",
+      headline: approvalHeadline(input.pendingApproval),
+      ...(input.pendingApproval.detail ? { detail: input.pendingApproval.detail } : {}),
+      tone: "info",
+      startedAt: input.pendingApproval.createdAt,
+    };
+  }
+
+  if (input.pendingUserInput) {
+    const question = input.pendingUserInput.questions[0];
+    return {
+      kind: "waiting-input",
+      live: true,
+      statusLabel: "Waiting",
+      headline: "Waiting for input",
+      ...(question?.question ? { detail: question.question } : {}),
+      tone: "info",
+      startedAt: input.pendingUserInput.createdAt,
+    };
+  }
+
+  if (input.phase === "connecting") {
+    return {
+      kind: "connecting",
+      live: true,
+      statusLabel: "Connecting",
+      headline: "Connecting to provider",
+      tone: "info",
+      startedAt: input.activeWorkStartedAt,
+    };
+  }
+
+  if (input.sendPhase === "preparing-worktree") {
+    return {
+      kind: "preparing-worktree",
+      live: true,
+      statusLabel: "Working",
+      headline: "Preparing worktree",
+      tone: "info",
+      startedAt: input.activeWorkStartedAt,
+    };
+  }
+
+  if (input.sendPhase === "sending-turn") {
+    return {
+      kind: "sending-turn",
+      live: true,
+      statusLabel: "Working",
+      headline: "Sending your turn",
+      tone: "info",
+      startedAt: input.activeWorkStartedAt,
+    };
+  }
+
+  const latestEntry = input.workEntries.at(-1);
+  if (input.phase === "running" || latestEntry) {
+    if (latestEntry) {
+      const derived = deriveActiveThinkingContextFromEntry(latestEntry);
+      return {
+        ...derived,
+        live: input.phase === "running",
+        startedAt: input.activeWorkStartedAt ?? latestEntry.createdAt,
+      };
+    }
+    return {
+      kind: "thinking",
+      live: true,
+      statusLabel: "Thinking",
+      headline: "Working on your request",
+      tone: "thinking",
+      startedAt: input.activeWorkStartedAt,
+    };
+  }
+
+  return {
+    kind: "idle",
+    live: false,
+    statusLabel: "Idle",
+    headline: "No active work",
+    tone: "info",
+    startedAt: null,
+  };
+}
+
+function deriveActiveThinkingContextFromEntry(
+  entry: WorkLogEntry,
+): Omit<ActiveThinkingContext, "live" | "startedAt"> {
+  if (entry.itemType) {
+    return {
+      kind: "tool",
+      statusLabel: "Working",
+      headline: toolHeadline(entry),
+      ...(entry.detail ? { detail: entry.detail } : {}),
+      ...(entry.command ? { command: entry.command } : {}),
+      ...(entry.changedFiles && entry.changedFiles.length > 0
+        ? { changedFiles: entry.changedFiles }
+        : {}),
+      itemType: entry.itemType,
+      tone: entry.tone,
+    };
+  }
+
+  const detailLine = firstLine(entry.detail);
+  const preferredHeadline =
+    entry.tone === "thinking" && detailLine
+      ? detailLine
+      : (normalizeEntryHeadline(entry.label) ?? detailLine ?? defaultHeadlineForTone(entry.tone));
+
+  return {
+    kind: entry.tone === "tool" ? "tool" : "thinking",
+    statusLabel: entry.tone === "tool" ? "Working" : "Thinking",
+    headline: preferredHeadline,
+    ...(detailLine && detailLine !== preferredHeadline ? { detail: detailLine } : {}),
+    ...(entry.command ? { command: entry.command } : {}),
+    ...(entry.changedFiles && entry.changedFiles.length > 0
+      ? { changedFiles: entry.changedFiles }
+      : {}),
+    tone: entry.tone,
+  };
+}
+
+function approvalHeadline(approval: PendingApproval): string {
+  switch (approval.requestKind) {
+    case "command":
+      return "Waiting for command approval";
+    case "file-read":
+      return "Waiting for file read approval";
+    case "file-change":
+      return "Waiting for file change approval";
+    default:
+      return "Waiting for approval";
+  }
+}
+
+function toolHeadline(entry: WorkLogEntry): string {
+  switch (entry.itemType) {
+    case "command_execution":
+      return "Running command";
+    case "file_change":
+      return entry.changedFiles && entry.changedFiles.length > 0
+        ? `Editing ${entry.changedFiles.length} ${entry.changedFiles.length === 1 ? "file" : "files"}`
+        : "Editing files";
+    case "web_search":
+      return "Searching the web";
+    case "image_view":
+      return "Inspecting image";
+    case "mcp_tool_call":
+    case "dynamic_tool_call":
+    case "collab_agent_tool_call":
+      return entry.toolTitle ? `Calling ${entry.toolTitle}` : "Calling tool";
+    default:
+      return normalizeEntryHeadline(entry.label) ?? "Working";
+  }
+}
+
+function defaultHeadlineForTone(tone: WorkLogEntry["tone"]): string {
+  switch (tone) {
+    case "error":
+      return "Hit an error";
+    case "tool":
+      return "Running tool";
+    case "thinking":
+      return "Thinking";
+    default:
+      return "Working";
+  }
+}
+
+function normalizeEntryHeadline(value: string | undefined): string | null {
+  const trimmed = asTrimmedString(value);
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.replace(/\s+/g, " ");
+  if (/^(reasoning update|thinking|working)$/i.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function firstLine(value: string | undefined): string | null {
+  const trimmed = asTrimmedString(value);
+  if (!trimmed) {
+    return null;
+  }
+  const [line] = trimmed.split(/\r?\n/, 1);
+  return line ? line.trim() : null;
 }
 
 export function inferCheckpointTurnCountByTurnId(

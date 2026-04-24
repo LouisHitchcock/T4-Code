@@ -5,11 +5,27 @@ export interface TimelineDurationMessage {
   completedAt?: string | undefined;
 }
 
+export function isCommandWorkEntry(input: {
+  itemType?: string | undefined;
+  requestKind?: string | undefined;
+  command?: string | undefined;
+}): boolean {
+  if (input.itemType === "command_execution") {
+    return true;
+  }
+  return input.requestKind === "command" && typeof input.command === "string";
+}
+
 export type TimelineWorkTone = "thinking" | "tool" | "info" | "error";
 
 export type TimelineWorkEntryVisualState = "active" | "recent" | "settled" | "error";
-
-export type TimelineRowKindForAnimation = "message" | "work" | "proposed-plan" | "working" | null;
+export type TimelineRowKindForAnimation =
+  | "message"
+  | "work"
+  | "command-work"
+  | "proposed-plan"
+  | "working"
+  | null;
 
 export function computeMessageDurationStart(
   messages: ReadonlyArray<TimelineDurationMessage>,
@@ -80,5 +96,8 @@ export function shouldAnimateAssistantResponseAfterTool(input: {
   messageRole: TimelineDurationMessage["role"];
   previousRowKind: TimelineRowKindForAnimation;
 }): boolean {
-  return input.messageRole === "assistant" && input.previousRowKind === "work";
+  return (
+    input.messageRole === "assistant" &&
+    (input.previousRowKind === "work" || input.previousRowKind === "command-work")
+  );
 }

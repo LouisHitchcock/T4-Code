@@ -257,6 +257,29 @@ describe("TerminalManager", () => {
     await manager.dispose();
   });
 
+  it("retries direct launch by splitting command strings when spawn fails with ENOENT", async () => {
+    const { manager, ptyAdapter } = makeManager();
+    ptyAdapter.spawnFailures.push(new Error("spawn ENOENT"));
+
+    await manager.open(
+      openInput({
+        command: "powershell.exe -NoLogo -NoProfile -Command \"echo hello\"",
+      }),
+    );
+
+    expect(ptyAdapter.spawnInputs).toHaveLength(2);
+    expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+      shell: "powershell.exe -NoLogo -NoProfile -Command \"echo hello\"",
+    });
+    const retrySpawn = ptyAdapter.spawnInputs[1];
+    expect(retrySpawn).toBeDefined();
+    if (!retrySpawn) return;
+    expect(path.basename(retrySpawn.shell).toLowerCase()).toBe("powershell.exe");
+    expect(retrySpawn.args).toEqual(["-NoLogo", "-NoProfile", "-Command", "echo hello"]);
+
+    await manager.dispose();
+  });
+
   it("restarts a session when the direct launch command changes", async () => {
     const { manager, ptyAdapter } = makeManager();
 

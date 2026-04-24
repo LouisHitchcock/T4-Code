@@ -707,6 +707,107 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("merges buffered command output deltas into completed command tool activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-command-output-delta-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-command-output"),
+      itemId: asItemId("item-command-output"),
+      payload: {
+        streamKind: "command_output",
+        delta: "shell=cmd\n",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-command-output-delta-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-command-output"),
+      itemId: asItemId("item-command-output"),
+      payload: {
+        streamKind: "command_output",
+        delta: "C:\\\\Users\\\\Louis\\\\Desktop\\\\Code\\\\T4-Code\n",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-command-output-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-command-output"),
+      itemId: asItemId("item-command-output"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Ran command",
+        detail: "cmd /c \"echo shell=cmd && cd\"",
+        data: {
+          item: {
+            command: "cmd /c \"echo shell=cmd && cd\"",
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-command-output-completed",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-command-output-completed",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    const data = payload?.data && typeof payload.data === "object" ? payload.data : undefined;
+    const item = data && "item" in data && data.item && typeof data.item === "object" ? data.item : undefined;
+    const result =
+      item && "result" in item && item.result && typeof item.result === "object"
+        ? (item.result as Record<string, unknown>)
+        : undefined;
+    const streamingActivity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) =>
+        entry.id === "activity:command.output.streaming:thread-1:item-command-output",
+    );
+    const streamingPayload =
+      streamingActivity?.payload && typeof streamingActivity.payload === "object"
+        ? (streamingActivity.payload as Record<string, unknown>)
+        : undefined;
+    const streamingData =
+      streamingPayload?.data && typeof streamingPayload.data === "object"
+        ? (streamingPayload.data as Record<string, unknown>)
+        : undefined;
+    const streamingItem =
+      streamingData?.item && typeof streamingData.item === "object"
+        ? (streamingData.item as Record<string, unknown>)
+        : undefined;
+    const streamingResult =
+      streamingItem?.result && typeof streamingItem.result === "object"
+        ? (streamingItem.result as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.itemType).toBe("command_execution");
+    expect(payload?.detail).toBe('cmd /c "echo shell=cmd && cd"');
+    expect(result?.output).toBe("shell=cmd\nC:\\\\Users\\\\Louis\\\\Desktop\\\\Code\\\\T4-Code");
+    expect(streamingActivity?.kind).toBe("command.output.streaming");
+    expect(streamingPayload?.itemType).toBe("command_execution");
+    expect(typeof streamingResult?.output).toBe("string");
+    expect(String(streamingResult?.output)).toContain("shell=cmd");
+    expect(String(streamingResult?.output)).toContain("T4-Code");
+  });
+
   it("projects completed plan items into first-class proposed plans", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

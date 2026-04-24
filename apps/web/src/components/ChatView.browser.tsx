@@ -31,6 +31,7 @@ import { isMacPlatform } from "../lib/utils";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
+import { buildBangCommandTerminalId } from "@t3tools/shared/terminalRun";
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
 const UUID_ROUTE_RE = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -2052,6 +2053,49 @@ describe("ChatView timeline estimator parity (full app)", () => {
           const remaining =
             scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
           expect(remaining).toBeLessThan(32);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs standalone ! commands through hidden terminal opens instead of provider turns", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-bang-command" as MessageId,
+        targetText: "bang command target",
+      }),
+    });
+
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "!echo hello from terminal");
+      const sendButton = await waitForComposerControl("primary-action");
+      await sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const terminalOpenRequest = wsRequests.find(
+            (request) =>
+              request._tag === WS_METHODS.terminalOpen &&
+              request.threadId === THREAD_ID &&
+              typeof request.terminalId === "string" &&
+              request.terminalId.startsWith(buildBangCommandTerminalId("")),
+          );
+          expect(terminalOpenRequest).toBeTruthy();
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                request.command &&
+                typeof request.command === "object" &&
+                !Array.isArray(request.command) &&
+                "type" in request.command &&
+                request.command.type === "thread.turn.start",
+            ),
+          ).toBe(false);
         },
         { timeout: 8_000, interval: 16 },
       );

@@ -15,7 +15,6 @@ import {
   createLsTool,
   createReadTool,
   createWriteTool,
-  getAgentDir,
   ModelRegistry,
   SessionManager,
   type SessionMessageEntry,
@@ -57,6 +56,7 @@ import {
   PI_PLAN_TOOL_NAMES,
   PI_PROVIDER,
   parsePiModelSlug,
+  resolvePiAgentDir,
   summarizePiToolArgs,
 } from "./piHarness.ts";
 
@@ -387,7 +387,7 @@ export class PiSdkManager extends EventEmitter<PiSdkManagerEvents> {
     super();
     this.now = options.now ?? (() => new Date().toISOString());
     this.stateDir = options.stateDir;
-    this.agentDir = normalizeString(options.agentDir) ?? getAgentDir();
+    this.agentDir = resolvePiAgentDir(options.agentDir);
     this.sessionDir =
       normalizeString(options.sessionDir) ??
       path.join(options.stateDir, "provider", "pi", "sessions");

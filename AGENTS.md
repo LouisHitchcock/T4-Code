@@ -33,6 +33,8 @@
 - Keep provider event logging opt-in. Raw provider prompts, tool payloads, approval answers, and runtime output must not be persisted by default; use `CUT3_ENABLE_PROVIDER_EVENT_LOGS=1` only for deliberate local debugging.
 - Keep provider exit failures visible end-to-end. If a runtime emits `session.exited` with a non-graceful reason, orchestration must preserve that reason in `thread.session.lastError` so OpenCode/Copilot/Kimi/Codex crashes do not look like silent clean stops.
 - When testing hot orchestration streams backed by PubSub, avoid `fork + sleep` subscription races. Start the collector with an explicit readiness handshake (for example `Effect.forkScoped` plus `Effect.yieldNow`, or another deterministic subscription barrier) before dispatching commands.
+- Keep provider-runtime test doubles lossless when the assertion depends on the first emitted event. For checkpoint/provider-runtime harnesses, prefer `Queue`-backed streams or another deterministic handoff over ad-hoc hot `PubSub` mocks that can drop `turn.started` before the subscriber is live.
+- Keep Pi tests isolated from the developer machine. Pi harness/provider-health tests that assert unauthenticated or empty-model states should set `PI_CODING_AGENT_DIR` to a temp directory, and clear Pi/provider API-key env vars that could otherwise make the health probe report a real locally configured account.
 - Keep interactive controls properly disabled during in-flight async operations (e.g. export, share, revoke): users must not be able to trigger conflicting actions while a prior action is still completing. Guard format toggles, download buttons, and secondary actions behind the relevant `isSaving`/`isRevoking` flags.
 - Keep sidebar organization logic centralized. Pin/archive/search/filter/sort behavior should stay in shared helpers/stores (`apps/web/src/components/Sidebar.logic.ts`, `apps/web/src/lib/threadOrdering.ts`, `apps/web/src/sidebarPreferencesStore.ts`) instead of being reimplemented ad hoc inside multiple sidebar render branches.
 - Keep project-creation and first-run onboarding flows centralized through the shared project-creation hook/component path. Empty-state onboarding and the sidebar add-project affordance should reuse the same project-create + first-thread navigation logic instead of drifting into separate implementations.
@@ -175,3 +177,24 @@ Docs:
 - Pi mono repo (`packages/coding-agent`): https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+<!-- CUT3_INIT:START -->
+
+## CUT3 Init Snapshot
+
+- Workspace root: T4-Code
+- Package manager: bun
+- Validation scripts: bun run fmt, bun run lint, bun run typecheck, bun run test
+- Root scripts: build, build:contracts, build:desktop, build:marketing, clean, dev, dev:desktop, dev:marketing, dev:server, dev:web, dist:desktop:artifact, dist:desktop:dmg, dist:desktop:dmg:arm64, dist:desktop:dmg:x64, dist:desktop:linux, dist:desktop:win, fmt, fmt:check, lint, release:checksums, release:smoke, start, start:desktop, start:marketing, sync:vscode-icons, test, test:desktop-smoke, typecheck
+- Top-level entries: .docs/, .git/, .gitattributes, .github/, .gitignore, .mise.toml, .oxfmtrc.json, .oxlintrc.json, .plans/, .vscode/, AGENTS.md, apps/, assets/, bun.lock, CLAUDE.md, CONTRIBUTING.md, CUT3.png, docs/, KEYBINDINGS.md, LICENSE, package.json, packages/, README.md, REMOTE.md, scripts/, TODO.md, tsconfig.base.json, turbo.json, vitest.config.ts
+
+## Structure
+
+- apps/: desktop, marketing, server, web
+- packages/: contracts, shared
+
+## Maintenance
+
+- Keep this file aligned with actual build, test, and workflow conventions.
+- Prefer repository scripts and documented workflows over ad-hoc local commands.
+<!-- CUT3_INIT:END -->

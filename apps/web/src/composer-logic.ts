@@ -303,6 +303,18 @@ export function parseStandaloneComposerSlashInvocation(
   };
 }
 
+export function parseStandaloneComposerBangCommand(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("!")) {
+    return null;
+  }
+  const command = trimmed.slice(1);
+  if (command.trim().length === 0) {
+    return null;
+  }
+  return command;
+}
+
 export function replaceTextRange(
   text: string,
   rangeStart: number,

@@ -35,6 +35,39 @@ export class StartupError extends Data.TaggedError("StartupError")<{
   readonly cause?: unknown;
 }> {}
 
+function applyBrandedEnvAliases(...suffixes: string[]): void {
+  for (const suffix of suffixes) {
+    const nextKey = `T4CODE_${suffix}`;
+    const legacyKey = `CUT3_${suffix}`;
+    const nextValue = process.env[nextKey];
+    const legacyValue = process.env[legacyKey];
+    if (nextValue === undefined && legacyValue !== undefined) {
+      process.env[nextKey] = legacyValue;
+    }
+    if (legacyValue === undefined && nextValue !== undefined) {
+      process.env[legacyKey] = nextValue;
+    }
+  }
+}
+
+applyBrandedEnvAliases(
+  "MODE",
+  "PORT",
+  "HOST",
+  "STATE_DIR",
+  "NO_BROWSER",
+  "AUTH_TOKEN",
+  "AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+  "LOG_WS_EVENTS",
+  "ENABLE_PROVIDER_EVENT_LOGS",
+  "STRICT_PROVIDER_LIFECYCLE_GUARD",
+  "POSTHOG_KEY",
+  "POSTHOG_HOST",
+  "TELEMETRY_ENABLED",
+  "TELEMETRY_FLUSH_BATCH_SIZE",
+  "TELEMETRY_MAX_BUFFERED_EVENTS",
+);
+
 interface CliInput {
   readonly mode: Option.Option<RuntimeMode>;
   readonly port: Option.Option<number>;
@@ -71,7 +104,7 @@ export interface CliConfigShape {
  * CliConfig - Service tag for startup CLI/runtime helpers.
  */
 export class CliConfig extends ServiceMap.Service<CliConfig, CliConfigShape>()(
-  "cut3/main/CliConfig",
+  "t4code/main/CliConfig",
 ) {
   static readonly layer = Layer.effect(
     CliConfig,

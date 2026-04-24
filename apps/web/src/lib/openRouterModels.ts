@@ -30,7 +30,8 @@ export type OpenRouterFreeModelCatalog =
       readonly models: ReadonlyArray<OpenRouterFreeModelOption>;
     };
 
-const OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY = "cut3:openrouter-free-models-cache:v1";
+const OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY = "t4code:openrouter-free-models-cache:v1";
+const LEGACY_OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY = "cut3:openrouter-free-models-cache:v1";
 
 export const OPENROUTER_FREE_ROUTER_OPTION: OpenRouterFreeModelOption = {
   slug: OPENROUTER_FREE_ROUTER_MODEL,
@@ -68,7 +69,7 @@ export function supportsOpenRouterReasoningEffortControl(
   _model: OpenRouterFreeModelOption | null | undefined,
 ): boolean {
   // OpenRouter's public catalog currently tells us whether a model supports reasoning,
-  // but not which effort levels are valid. CUT3 should not send Codex-specific effort
+  // but not which effort levels are valid. T4Code should not send Codex-specific effort
   // values for OpenRouter models until that metadata is available.
   return false;
 }
@@ -226,7 +227,9 @@ function readCachedOpenRouterFreeModelCatalog(): {
   }
 
   try {
-    const raw = window.localStorage.getItem(OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY);
     if (!raw) {
       return null;
     }
@@ -271,6 +274,7 @@ function writeCachedOpenRouterFreeModelCatalog(
         models: catalog.models,
       }),
     );
+    window.localStorage.removeItem(LEGACY_OPENROUTER_FREE_MODEL_CACHE_STORAGE_KEY);
   } catch {
     // Best-effort cache only.
   }

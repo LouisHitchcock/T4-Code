@@ -39,4 +39,4 @@ export interface OrchestrationProjectionPipelineShape {
 export class OrchestrationProjectionPipeline extends ServiceMap.Service<
   OrchestrationProjectionPipeline,
   OrchestrationProjectionPipelineShape
->()("cut3/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}
+>()("t4code/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}

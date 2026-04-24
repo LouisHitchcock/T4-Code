@@ -46,6 +46,9 @@ import type {
 import type {
   TerminalClearInput,
   TerminalCloseInput,
+  TerminalExecEvent,
+  TerminalExecInput,
+  TerminalExecResult,
   TerminalEvent,
   TerminalOpenInput,
   TerminalResizeInput,
@@ -166,6 +169,8 @@ export interface NativeApi {
     restart: (input: TerminalRestartInput) => Promise<TerminalSessionSnapshot>;
     close: (input: TerminalCloseInput) => Promise<void>;
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
+    exec: (input: TerminalExecInput) => Promise<TerminalExecResult>;
+    onExecEvent: (callback: (event: TerminalExecEvent) => void) => () => void;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;

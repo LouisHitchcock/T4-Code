@@ -72,7 +72,7 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     title: "OpenCode",
     description: "Save extra provider/model IDs for the picker and `/model`.",
     placeholder: "provider/model-id",
-    example: "z-ai/glm-4.5",
+    example: "ollama/llama3.2",
   },
   {
     provider: "kimi",
@@ -88,6 +88,12 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "provider/model-id",
     example: "github-copilot/claude-sonnet-4.5",
   },
+] as const;
+
+const OPENCODE_LOCAL_LLAMA_PRESETS = [
+  "ollama/llama3.2",
+  "ollama/llama3.1:8b",
+  "ollama/llama3.3:70b",
 ] as const;
 
 function getSettingsCopy(language: AppLanguage) {
@@ -232,6 +238,9 @@ function getSettingsCopy(language: AppLanguage) {
             "شناسه های provider/model اضافی Pi را برای انتخابگر و دستور /model ذخیره کنید.",
         },
       },
+      localLlamaPresetsTitle: "پریست های Local Llama",
+      localLlamaPresetsDescription:
+        "شناسه های رایج ollama/... را با یک کلیک به مدل های OpenCode اضافه کنید.",
       threadsTitle: "رشته ها",
       threadsDescription: "حالت فضای کاری پیش فرض برای رشته های پیش نویس جدید را انتخاب کنید.",
       defaultToNewWorktree: "پیش فرض روی New worktree",
@@ -433,6 +442,9 @@ function getSettingsCopy(language: AppLanguage) {
         description: "Save additional Pi provider/model ids for the picker and /model command.",
       },
     },
+    localLlamaPresetsTitle: "Local Llama presets",
+    localLlamaPresetsDescription:
+      "Quick add common Ollama Llama model IDs for OpenCode sessions.",
     threadsTitle: "Threads",
     threadsDescription: "Choose the default workspace mode for newly created draft threads.",
     defaultToNewWorktree: "Default to New worktree",
@@ -951,6 +963,32 @@ function SettingsRouteView() {
               {copy.addModel}
             </Button>
           </div>
+          {provider === "opencode" ? (
+            <div className="rounded-lg border border-border bg-background px-3 py-3">
+              <p className="text-xs font-medium text-foreground">{copy.localLlamaPresetsTitle}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {copy.localLlamaPresetsDescription}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {OPENCODE_LOCAL_LLAMA_PRESETS.map((slug) => {
+                  const isSaved = customModels.includes(slug);
+                  return (
+                    <Button
+                      key={`opencode-local-llama:${slug}`}
+                      size="xs"
+                      variant={isSaved ? "outline" : "secondary"}
+                      disabled={isSaved}
+                      onClick={() => {
+                        saveCustomModel("opencode", slug);
+                      }}
+                    >
+                      {isSaved ? `${copy.saved}: ${slug}` : `${copy.addToPicker}: ${slug}`}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {customModelError ? <p className="text-xs text-destructive">{customModelError}</p> : null}
 

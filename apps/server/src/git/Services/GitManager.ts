@@ -58,5 +58,5 @@ export interface GitManagerShape {
  * GitManager - Service tag for stacked Git workflow orchestration.
  */
 export class GitManager extends ServiceMap.Service<GitManager, GitManagerShape>()(
-  "cut3/git/Services/GitManager",
+  "t4code/git/Services/GitManager",
 ) {}

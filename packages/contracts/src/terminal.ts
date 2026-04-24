@@ -83,6 +83,126 @@ export const TerminalCloseInput = Schema.Struct({
   deleteHistory: Schema.optional(Schema.Boolean),
 });
 export type TerminalCloseInput = Schema.Codec.Encoded<typeof TerminalCloseInput>;
+export const TerminalExecMode = Schema.Literals(["wait", "interact"]);
+export type TerminalExecMode = typeof TerminalExecMode.Type;
+
+export const TerminalExecInput = Schema.Struct({
+  ...TerminalSessionInput.fields,
+  cwd: TrimmedNonEmptyStringSchema,
+  mode: TerminalExecMode.pipe(Schema.withDecodingDefault(() => "wait")),
+  command: TerminalCommandSchema,
+  args: Schema.optional(TerminalCommandArgsSchema),
+  env: Schema.optional(TerminalEnvSchema),
+  cols: Schema.optional(TerminalColsSchema),
+  rows: Schema.optional(TerminalRowsSchema),
+  isReadOnly: Schema.optional(Schema.Boolean.pipe(Schema.withDecodingDefault(() => false))),
+  isRisky: Schema.optional(Schema.Boolean.pipe(Schema.withDecodingDefault(() => false))),
+  usesPager: Schema.optional(Schema.Boolean.pipe(Schema.withDecodingDefault(() => false))),
+  approveRiskyExecution: Schema.optional(
+    Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  ),
+  reason: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(1_024))),
+  timeoutMs: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(900_000)),
+  ),
+});
+export type TerminalExecInput = Schema.Codec.Encoded<typeof TerminalExecInput>;
+
+const TerminalExecMetadata = Schema.Struct({
+  isReadOnly: Schema.Boolean,
+  isRisky: Schema.Boolean,
+  usesPager: Schema.Boolean,
+  reason: Schema.NullOr(Schema.String),
+});
+
+const TerminalExecResultBase = Schema.Struct({
+  threadId: Schema.String.check(Schema.isNonEmpty()),
+  terminalId: Schema.String.check(Schema.isNonEmpty()),
+  commandId: Schema.String.check(Schema.isNonEmpty()),
+  mode: TerminalExecMode,
+  command: Schema.String.check(Schema.isNonEmpty()),
+  args: Schema.Array(Schema.String),
+  cwd: Schema.String.check(Schema.isNonEmpty()),
+  startedAt: Schema.String,
+  metadata: TerminalExecMetadata,
+});
+
+const TerminalWaitExecStatus = Schema.Literals(["succeeded", "failed", "timed_out"]);
+export type TerminalWaitExecStatus = typeof TerminalWaitExecStatus.Type;
+
+export const TerminalWaitExecResult = Schema.Struct({
+  ...TerminalExecResultBase.fields,
+  mode: Schema.Literal("wait"),
+  status: TerminalWaitExecStatus,
+  completedAt: Schema.String,
+  durationMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  exitCode: Schema.NullOr(Schema.Int),
+  exitSignal: Schema.NullOr(Schema.String),
+  timedOut: Schema.Boolean,
+  stdout: Schema.String,
+  stderr: Schema.String,
+  stdoutTruncated: Schema.Boolean,
+  stderrTruncated: Schema.Boolean,
+});
+export type TerminalWaitExecResult = typeof TerminalWaitExecResult.Type;
+
+export const TerminalInteractExecResult = Schema.Struct({
+  ...TerminalExecResultBase.fields,
+  mode: Schema.Literal("interact"),
+  status: Schema.Literal("running"),
+  snapshot: Schema.suspend(() => TerminalSessionSnapshot),
+});
+export type TerminalInteractExecResult = typeof TerminalInteractExecResult.Type;
+
+export const TerminalExecResult = Schema.Union([
+  TerminalWaitExecResult,
+  TerminalInteractExecResult,
+]);
+export type TerminalExecResult = typeof TerminalExecResult.Type;
+
+const TerminalExecEventBase = Schema.Struct({
+  threadId: Schema.String.check(Schema.isNonEmpty()),
+  terminalId: Schema.String.check(Schema.isNonEmpty()),
+  commandId: Schema.String.check(Schema.isNonEmpty()),
+  createdAt: Schema.String,
+  mode: TerminalExecMode,
+});
+
+const TerminalExecStartedEvent = Schema.Struct({
+  ...TerminalExecEventBase.fields,
+  type: Schema.Literal("exec.started"),
+  command: Schema.String.check(Schema.isNonEmpty()),
+  args: Schema.Array(Schema.String),
+  cwd: Schema.String.check(Schema.isNonEmpty()),
+  metadata: TerminalExecMetadata,
+});
+
+const TerminalExecOutputEvent = Schema.Struct({
+  ...TerminalExecEventBase.fields,
+  type: Schema.Literal("exec.output"),
+  stream: Schema.Literals(["stdout", "stderr"]),
+  data: Schema.String.check(Schema.isNonEmpty()),
+});
+
+const TerminalExecCompletedEvent = Schema.Struct({
+  ...TerminalExecEventBase.fields,
+  type: Schema.Literal("exec.completed"),
+  result: TerminalExecResult,
+});
+
+const TerminalExecErrorEvent = Schema.Struct({
+  ...TerminalExecEventBase.fields,
+  type: Schema.Literal("exec.error"),
+  message: Schema.String.check(Schema.isNonEmpty()),
+});
+
+export const TerminalExecEvent = Schema.Union([
+  TerminalExecStartedEvent,
+  TerminalExecOutputEvent,
+  TerminalExecCompletedEvent,
+  TerminalExecErrorEvent,
+]);
+export type TerminalExecEvent = typeof TerminalExecEvent.Type;
 
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;

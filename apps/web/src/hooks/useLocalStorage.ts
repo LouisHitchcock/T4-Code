@@ -19,6 +19,42 @@ const isomorphicLocalStorage: Storage =
         };
       })();
 
+const LEGACY_LOCAL_STORAGE_KEYS: Record<string, readonly string[]> = {
+  "t4code:last-editor": ["cut3:last-editor"],
+  "t4code:last-invoked-script-by-project": ["cut3:last-invoked-script-by-project"],
+  "t4code:theme": ["cut3:theme"],
+};
+
+function getStorageKeyCandidates(key: string): readonly string[] {
+  const legacyKeys = LEGACY_LOCAL_STORAGE_KEYS[key] ?? [];
+  return [key, ...legacyKeys];
+}
+
+function readLocalStorageString(key: string): string | null {
+  const currentKey = key;
+  const legacyKeys = LEGACY_LOCAL_STORAGE_KEYS[key] ?? [];
+  const current = isomorphicLocalStorage.getItem(currentKey);
+  if (current !== null) {
+    return current;
+  }
+
+  for (const legacyKey of legacyKeys) {
+    const legacyValue = isomorphicLocalStorage.getItem(legacyKey);
+    if (legacyValue === null) {
+      continue;
+    }
+    try {
+      isomorphicLocalStorage.setItem(currentKey, legacyValue);
+      isomorphicLocalStorage.removeItem(legacyKey);
+    } catch {
+      // Best-effort migration only.
+    }
+    return legacyValue;
+  }
+
+  return null;
+}
+
 const decode = <T, E>(schema: Schema.Codec<T, E>, value: string) =>
   Schema.decodeSync(Schema.fromJsonString(schema))(value);
 
@@ -26,20 +62,26 @@ const encode = <T, E>(schema: Schema.Codec<T, E>, value: T) =>
   Schema.encodeSync(Schema.fromJsonString(schema))(value);
 
 export const getLocalStorageItem = <T, E>(key: string, schema: Schema.Codec<T, E>): T | null => {
-  const item = isomorphicLocalStorage.getItem(key);
+  const item = readLocalStorageString(key);
   return item ? decode(schema, item) : null;
 };
 
 export const setLocalStorageItem = <T, E>(key: string, value: T, schema: Schema.Codec<T, E>) => {
   const valueToSet = encode(schema, value);
   isomorphicLocalStorage.setItem(key, valueToSet);
+  for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS[key] ?? []) {
+    isomorphicLocalStorage.removeItem(legacyKey);
+  }
 };
 
 export const removeLocalStorageItem = (key: string) => {
   isomorphicLocalStorage.removeItem(key);
+  for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS[key] ?? []) {
+    isomorphicLocalStorage.removeItem(legacyKey);
+  }
 };
 
-const LOCAL_STORAGE_CHANGE_EVENT = "cut3:local_storage_change";
+const LOCAL_STORAGE_CHANGE_EVENT = "t4code:local_storage_change";
 
 interface LocalStorageChangeDetail {
   key: string;
@@ -119,7 +161,7 @@ export function useLocalStorage<T, E>(
     };
 
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === key) {
+      if (event.key !== null && getStorageKeyCandidates(key).includes(event.key)) {
         syncFromStorage();
       }
     };

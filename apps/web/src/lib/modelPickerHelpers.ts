@@ -188,7 +188,7 @@ export function getProviderPickerSectionDescription(provider: AvailableProviderP
     case "kimi":
       return "Kimi Code sessions backed by either `kimi login` / `/login` CLI auth or a configured Kimi API key.";
     case "opencode":
-      return "OpenCode models discovered from your local OpenCode runtime.";
+      return "OpenCode models discovered from your local OpenCode runtime, including custom provider/model IDs (for example ollama/llama...).";
     case "pi":
       return "Pi agent harness sessions discovered from your local Pi auth/config using provider/model ids.";
     default:

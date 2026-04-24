@@ -73,4 +73,4 @@ export interface ProjectionThreadSessionRepositoryShape {
 export class ProjectionThreadSessionRepository extends ServiceMap.Service<
   ProjectionThreadSessionRepository,
   ProjectionThreadSessionRepositoryShape
->()("cut3/persistence/Services/ProjectionThreadSessions/ProjectionThreadSessionRepository") {}
+>()("t4code/persistence/Services/ProjectionThreadSessions/ProjectionThreadSessionRepository") {}

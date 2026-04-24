@@ -38,47 +38,47 @@ describe("isForkPrereleaseVersion", () => {
 });
 
 describe("resolveAppReleaseBranding", () => {
-  it("keeps local dev-server sessions on unified CUT3 branding", () => {
+  it("keeps local dev-server sessions on unified T4Code branding", () => {
     expect(resolveAppReleaseBranding({ version: "1.2.3", isDevelopment: true })).toEqual({
-      stageLabel: "CUT3",
-      displayName: "CUT3",
-      productName: "CUT3",
-      appId: "com.t3tools.cut3",
-      stateDirName: "cut3",
-      userDataDirName: "cut3",
+      stageLabel: "T4Code",
+      displayName: "T4Code",
+      productName: "T4Code",
+      appId: "com.t3tools.t4code",
+      stateDirName: "t4code",
+      userDataDirName: "t4code",
     });
   });
 
-  it("keeps prerelease packages on unified CUT3 branding", () => {
+  it("keeps prerelease packages on unified T4Code branding", () => {
     expect(resolveAppReleaseBranding({ version: "0.0.11-alpha.3", isDevelopment: false })).toEqual({
-      stageLabel: "CUT3",
-      displayName: "CUT3",
-      productName: "CUT3",
-      appId: "com.t3tools.cut3",
-      stateDirName: "cut3",
-      userDataDirName: "cut3",
+      stageLabel: "T4Code",
+      displayName: "T4Code",
+      productName: "T4Code",
+      appId: "com.t3tools.t4code",
+      stateDirName: "t4code",
+      userDataDirName: "t4code",
     });
   });
 
-  it("keeps fork prerelease packages on unified CUT3 branding", () => {
+  it("keeps fork prerelease packages on unified T4Code branding", () => {
     expect(resolveAppReleaseBranding({ version: "0.0.11-fork.3", isDevelopment: false })).toEqual({
-      stageLabel: "CUT3",
-      displayName: "CUT3",
-      productName: "CUT3",
-      appId: "com.t3tools.cut3",
-      stateDirName: "cut3",
-      userDataDirName: "cut3",
+      stageLabel: "T4Code",
+      displayName: "T4Code",
+      productName: "T4Code",
+      appId: "com.t3tools.t4code",
+      stateDirName: "t4code",
+      userDataDirName: "t4code",
     });
   });
 
-  it("keeps stable packaged builds on unified CUT3 branding", () => {
+  it("keeps stable packaged builds on unified T4Code branding", () => {
     expect(resolveAppReleaseBranding({ version: "1.2.3", isDevelopment: false })).toEqual({
-      stageLabel: "CUT3",
-      displayName: "CUT3",
-      productName: "CUT3",
-      appId: "com.t3tools.cut3",
-      stateDirName: "cut3",
-      userDataDirName: "cut3",
+      stageLabel: "T4Code",
+      displayName: "T4Code",
+      productName: "T4Code",
+      appId: "com.t3tools.t4code",
+      stateDirName: "t4code",
+      userDataDirName: "t4code",
     });
   });
 });

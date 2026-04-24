@@ -13,6 +13,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckCircle2Icon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   GitPullRequestIcon,
@@ -26,6 +27,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { clamp } from "effect/Number";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -37,6 +39,7 @@ import {
   computeMessageDurationStart,
   deriveTimelineWorkEntryVisualState,
   formatWorkingTimer,
+  isCommandWorkEntry,
   normalizeCompactToolLabel,
   shouldAnimateAssistantResponseAfterTool,
 } from "./MessagesTimeline.logic";
@@ -57,6 +60,7 @@ interface MessagesTimelineProps {
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  workLogTurnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
@@ -86,6 +90,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionDividerBeforeEntryId,
   completionSummary,
   turnDiffSummaryByAssistantMessageId,
+  workLogTurnDiffSummaryByTurnId,
   nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
@@ -145,11 +150,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }
 
       if (timelineEntry.kind === "work") {
+        if (isCommandWorkEntry(timelineEntry.entry)) {
+          nextRows.push({
+            kind: "command-work",
+            id: timelineEntry.id,
+            createdAt: timelineEntry.createdAt,
+            entry: timelineEntry.entry,
+          });
+          continue;
+        }
         const groupedEntries = [timelineEntry.entry];
         let cursor = index + 1;
         while (cursor < timelineEntries.length) {
           const nextEntry = timelineEntries[cursor];
           if (!nextEntry || nextEntry.kind !== "work") break;
+          if (isCommandWorkEntry(nextEntry.entry)) break;
           groupedEntries.push(nextEntry.entry);
           cursor += 1;
         }
@@ -190,7 +205,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       });
     }
 
-    const hasWorkRows = nextRows.some((row) => row.kind === "work");
+    const hasWorkRows = nextRows.some((row) => row.kind === "work" || row.kind === "command-work");
 
     if (isWorking && !hasWorkRows) {
       nextRows.push({
@@ -255,6 +270,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       if (row.kind === "work") return 112;
+      if (row.kind === "command-work") return 172;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
@@ -307,6 +323,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
     return null;
   }, [isWorking, rows]);
+  const [expandedCommandOutputByEntryId, setExpandedCommandOutputByEntryId] = useState<
+    Record<string, boolean>
+  >({});
+  const onSetCommandOutputExpanded = useCallback((entryId: string, expanded: boolean) => {
+    setExpandedCommandOutputByEntryId((current) => ({
+      ...current,
+      [entryId]: expanded,
+    }));
+  }, []);
   const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
     Record<string, boolean>
   >({});
@@ -413,12 +438,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     isLatestVisibleEntry={index === visibleEntries.length - 1}
                     entryIndex={index}
                     visibleEntryCount={visibleEntries.length}
+                    workLogTurnDiffSummaryByTurnId={workLogTurnDiffSummaryByTurnId}
+                    onOpenTurnDiff={onOpenTurnDiff}
                   />
                 ))}
               </div>
             </div>
           );
         })()}
+
+      {row.kind === "command-work" && (
+        <InlineCommandEntryRow
+          workEntry={row.entry}
+          isOutputExpanded={
+            expandedCommandOutputByEntryId[row.entry.id] ??
+            (typeof row.entry.detail === "string" && row.entry.detail.trim().length > 0)
+          }
+          onOutputExpandedChange={(expanded) => onSetCommandOutputExpanded(row.entry.id, expanded)}
+          timestampFormat={timestampFormat}
+        />
+      )}
 
       {row.kind === "message" &&
         row.message.role === "user" &&
@@ -658,7 +697,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     <div
       ref={timelineRootRef}
       data-timeline-root="true"
-      className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden [contain:content]"
+      className="mx-auto w-full min-w-0 max-w-5xl overflow-x-hidden [contain:content]"
     >
       {virtualizedRowCount > 0 && (
         <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
@@ -698,6 +737,12 @@ type TimelineRow =
       id: string;
       createdAt: string;
       groupedEntries: TimelineWorkEntry[];
+    }
+  | {
+      kind: "command-work";
+      id: string;
+      createdAt: string;
+      entry: TimelineWorkEntry;
     }
   | {
       kind: "message";
@@ -854,6 +899,114 @@ function workEntryPreviewClass(
   return "text-muted-foreground/58";
 }
 
+function inlineCommandStatusLabel(workEntry: TimelineWorkEntry): string {
+  if (workEntry.tone === "error") return "Failed";
+  if (workEntry.label.trim().toLowerCase() === "running command") return "Live";
+  return "Done";
+}
+
+function inlineCommandHeading(workEntry: TimelineWorkEntry): string {
+  const label = workEntry.label.trim();
+  if (label.length > 0) return capitalizePhrase(label);
+  return workEntry.tone === "error" ? "Command failed" : "Running command";
+}
+
+const InlineCommandEntryRow = memo(function InlineCommandEntryRow(props: {
+  workEntry: TimelineWorkEntry;
+  isOutputExpanded: boolean;
+  onOutputExpandedChange: (expanded: boolean) => void;
+  timestampFormat: TimestampFormat;
+}) {
+  const { workEntry, isOutputExpanded, onOutputExpandedChange, timestampFormat } = props;
+  const heading = inlineCommandHeading(workEntry);
+  const statusLabel = inlineCommandStatusLabel(workEntry);
+  const output = workEntry.detail?.trimEnd() ?? "";
+  const hasOutput = output.length > 0;
+
+  return (
+    <div className="flex justify-start">
+      <div
+        className={cn(
+          "w-full max-w-[92%] overflow-hidden rounded-2xl border px-3.5 py-3 shadow-[0_8px_26px_-20px_--alpha(var(--color-black)/20%)]",
+          workEntry.tone === "error"
+            ? "border-rose-400/32 bg-rose-500/[0.08]"
+            : "border-border/70 bg-card/60",
+        )}
+      >
+        <div className="flex items-start justify-between gap-2.5">
+          <div className="min-w-0 flex items-center gap-2">
+            <span
+              className={cn(
+                "flex size-7 shrink-0 items-center justify-center rounded-xl border",
+                workEntry.tone === "error"
+                  ? "border-rose-300/40 bg-rose-500/15 text-rose-300"
+                  : "border-border/65 bg-background/72 text-foreground/85",
+              )}
+            >
+              <TerminalIcon className="size-3.5" />
+            </span>
+            <p className="truncate text-[12px] font-medium text-foreground/92" title={heading}>
+              {heading}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]",
+                statusLabel === "Live"
+                  ? "border-border/60 bg-background/80 text-foreground/82"
+                  : statusLabel === "Failed"
+                    ? "border-rose-300/45 bg-rose-500/[0.14] text-rose-200"
+                    : "border-border/55 bg-background/65 text-muted-foreground/78",
+              )}
+            >
+              {statusLabel}
+            </span>
+            <span className="text-[10px] text-muted-foreground/48">
+              {formatTimestamp(workEntry.createdAt, timestampFormat)}
+            </span>
+          </div>
+        </div>
+        {workEntry.command && (
+          <div className="mt-2 rounded-lg border border-border/65 bg-background/72 px-2.5 py-2">
+            <code
+              className="block break-words font-mono text-[11px] leading-5 text-foreground/88"
+              title={workEntry.command}
+            >
+              {workEntry.command}
+            </code>
+          </div>
+        )}
+        {hasOutput && (
+          <Collapsible open={isOutputExpanded} onOpenChange={onOutputExpandedChange}>
+            <div className="mt-2">
+              <CollapsibleTrigger
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/55 px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 hover:text-foreground/80"
+              >
+                <ChevronRightIcon
+                  className={cn(
+                    "size-3 transition-transform duration-200",
+                    isOutputExpanded && "rotate-90",
+                  )}
+                />
+                <span>{isOutputExpanded ? "Hide output" : "Show output"}</span>
+              </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent keepMounted className="mt-2">
+              <div className="max-h-72 overflow-auto rounded-lg border border-border/65 bg-background/80 px-2.5 py-2">
+                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground/88">
+                  {output}
+                </pre>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const ToolCallActivityBadge = memo(function ToolCallActivityBadge(props: {
   isLive: boolean;
   entryCount: number;
@@ -890,8 +1043,18 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   isLatestVisibleEntry: boolean;
   entryIndex: number;
   visibleEntryCount: number;
+  workLogTurnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { workEntry, isLiveGroup, isLatestVisibleEntry, entryIndex, visibleEntryCount } = props;
+  const {
+    workEntry,
+    isLiveGroup,
+    isLatestVisibleEntry,
+    entryIndex,
+    visibleEntryCount,
+    workLogTurnDiffSummaryByTurnId,
+    onOpenTurnDiff,
+  } = props;
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -904,8 +1067,24 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     visibleEntryCount,
   });
   const displayText = preview ? `${heading}: ${preview}` : heading;
-  const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
+  const turnDiffSummary =
+    workEntry.turnId !== undefined
+      ? (workLogTurnDiffSummaryByTurnId.get(workEntry.turnId) ?? null)
+      : null;
+  const turnDiffFiles = turnDiffSummary?.files ?? [];
+  const changedFiles = Array.from(
+    new Set(
+      (turnDiffFiles.length > 0 ? turnDiffFiles.map((file) => file.path) : workEntry.changedFiles) ??
+        [],
+    ),
+  );
+  const hasChangedFiles = changedFiles.length > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const turnDiffStat = turnDiffFiles.length > 0 ? summarizeTurnDiffStats(turnDiffFiles) : null;
+  const showsTurnDiffActions =
+    turnDiffSummary !== null &&
+    turnDiffFiles.length > 0 &&
+    (workEntry.itemType === "file_change" || (workEntry.changedFiles?.length ?? 0) > 0);
 
   return (
     <div
@@ -961,27 +1140,76 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </div>
         </div>
       </div>
+      {showsTurnDiffActions && turnDiffSummary && (
+        <div className="relative z-10 mt-2 flex flex-wrap items-center gap-1.5 pl-11">
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground/72",
+              visualState === "active"
+                ? "border-border/55 bg-background/72"
+                : "border-border/45 bg-background/60",
+            )}
+          >
+            {changedFiles.length} file{changedFiles.length === 1 ? "" : "s"}
+          </span>
+          {turnDiffStat && hasNonZeroStat(turnDiffStat) && (
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 font-mono text-[10px]",
+                visualState === "active"
+                  ? "border-border/55 bg-background/72"
+                  : "border-border/45 bg-background/60",
+              )}
+            >
+              <DiffStatLabel additions={turnDiffStat.additions} deletions={turnDiffStat.deletions} />
+            </span>
+          )}
+          <button
+            type="button"
+            className="rounded-full border border-border/50 bg-background/65 px-2 py-0.5 text-[10px] text-muted-foreground/72 transition-colors hover:border-border/70 hover:text-foreground/80"
+            onClick={() => onOpenTurnDiff(turnDiffSummary.turnId, changedFiles[0])}
+          >
+            View diff
+          </button>
+        </div>
+      )}
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="relative z-10 mt-2 flex flex-wrap gap-1 pl-11">
-          {workEntry.changedFiles?.slice(0, 4).map((filePath) => (
-            <span
-              key={`${workEntry.id}:${filePath}`}
-              className={cn(
-                "rounded-full border px-2 py-0.5 font-mono text-[10px] transition-[border-color,background-color,color] duration-200",
-                "group-hover/entry:border-border/65 group-hover/entry:bg-background/80",
-                visualState === "active"
-                  ? "border-border/55 bg-background/72 text-muted-foreground/82"
-                  : "border-border/45 bg-background/60 text-muted-foreground/68",
-              )}
-              title={filePath}
-            >
-              {filePath}
-            </span>
-          ))}
-          {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/50">
-              +{(workEntry.changedFiles?.length ?? 0) - 4}
-            </span>
+          {changedFiles.slice(0, 4).map((filePath) =>
+            turnDiffSummary ? (
+              <button
+                key={`${workEntry.id}:${filePath}`}
+                type="button"
+                className={cn(
+                  "rounded-full border px-2 py-0.5 font-mono text-[10px] transition-[border-color,background-color,color] duration-200",
+                  "group-hover/entry:border-border/65 group-hover/entry:bg-background/80",
+                  visualState === "active"
+                    ? "border-border/55 bg-background/72 text-muted-foreground/82"
+                    : "border-border/45 bg-background/60 text-muted-foreground/68",
+                )}
+                title={filePath}
+                onClick={() => onOpenTurnDiff(turnDiffSummary.turnId, filePath)}
+              >
+                {filePath}
+              </button>
+            ) : (
+              <span
+                key={`${workEntry.id}:${filePath}`}
+                className={cn(
+                  "rounded-full border px-2 py-0.5 font-mono text-[10px] transition-[border-color,background-color,color] duration-200",
+                  "group-hover/entry:border-border/65 group-hover/entry:bg-background/80",
+                  visualState === "active"
+                    ? "border-border/55 bg-background/72 text-muted-foreground/82"
+                    : "border-border/45 bg-background/60 text-muted-foreground/68",
+                )}
+                title={filePath}
+              >
+                {filePath}
+              </span>
+            ),
+          )}
+          {changedFiles.length > 4 && (
+            <span className="px-1 text-[10px] text-muted-foreground/50">+{changedFiles.length - 4}</span>
           )}
         </div>
       )}

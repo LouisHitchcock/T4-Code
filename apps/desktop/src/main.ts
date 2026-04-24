@@ -57,6 +57,15 @@ import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runti
 
 fixPath();
 
+function readBrandedEnv(name: string): string | undefined {
+  return process.env[`T4CODE_${name}`] ?? process.env[`CUT3_${name}`];
+}
+
+function setBrandedEnv(name: string, value: string): void {
+  process.env[`T4CODE_${name}`] = value;
+  process.env[`CUT3_${name}`] = value;
+}
+
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
@@ -78,7 +87,7 @@ const appReleaseBranding = resolveAppReleaseBranding({
   isDevelopment,
 });
 const STATE_DIR =
-  process.env.CUT3_STATE_DIR?.trim() ||
+  readBrandedEnv("STATE_DIR")?.trim() ||
   Path.join(OS.homedir(), ".t3", appReleaseBranding.stateDirName);
 const APP_DISPLAY_NAME = appReleaseBranding.displayName;
 const APP_USER_MODEL_ID = appReleaseBranding.appId;
@@ -542,7 +551,7 @@ function resolveAboutCommitHash(): string | null {
     return aboutCommitHashCache;
   }
 
-  const envCommitHash = normalizeCommitHash(process.env.CUT3_COMMIT_HASH);
+  const envCommitHash = normalizeCommitHash(readBrandedEnv("COMMIT_HASH"));
   if (envCommitHash) {
     aboutCommitHashCache = envCommitHash;
     return aboutCommitHashCache;
@@ -564,7 +573,7 @@ function resolveBackendEntry(): string {
 }
 
 function resolveBackendCwd(): string {
-  const override = process.env.CUT3_BACKEND_CWD?.trim();
+  const override = readBrandedEnv("BACKEND_CWD")?.trim();
   if (override) {
     return override;
   }
@@ -651,7 +660,7 @@ function updateBackendWsUrl(port: number): void {
     port,
     authToken: backendAuthToken,
   });
-  process.env.CUT3_DESKTOP_WS_URL = backendWsUrl;
+  setBrandedEnv("DESKTOP_WS_URL", backendWsUrl);
   writeDesktopLogHeader(`backend websocket url updated port=${port}`);
   broadcastBackendWsUrl();
 }
@@ -747,7 +756,7 @@ function handleCheckForUpdatesMenuClick(): void {
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.CUT3_DISABLE_AUTO_UPDATE === "1",
+    disabledByEnv: readBrandedEnv("DISABLE_AUTO_UPDATE") === "1",
   });
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
@@ -999,7 +1008,7 @@ function shouldEnableAutoUpdates(): boolean {
       isPackaged: app.isPackaged,
       platform: process.platform,
       appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.CUT3_DISABLE_AUTO_UPDATE === "1",
+      disabledByEnv: readBrandedEnv("DISABLE_AUTO_UPDATE") === "1",
     }) === null
   );
 }
@@ -1084,7 +1093,11 @@ function configureAutoUpdater(): void {
   updaterConfigured = true;
 
   const githubToken =
-    process.env.CUT3_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+    (
+      process.env.T4CODE_DESKTOP_UPDATE_GITHUB_TOKEN ?? process.env.CUT3_DESKTOP_UPDATE_GITHUB_TOKEN
+    )?.trim() ||
+    process.env.GH_TOKEN?.trim() ||
+    "";
   if (githubToken) {
     // When a token is provided, re-configure the feed with `private: true` so
     // electron-updater uses the GitHub API (api.github.com) instead of the
@@ -1187,6 +1200,11 @@ function configureAutoUpdater(): void {
 function backendEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    T4CODE_MODE: "desktop",
+    T4CODE_NO_BROWSER: "1",
+    T4CODE_PORT: "0",
+    T4CODE_STATE_DIR: STATE_DIR,
+    T4CODE_AUTH_TOKEN: backendAuthToken,
     CUT3_MODE: "desktop",
     CUT3_NO_BROWSER: "1",
     CUT3_PORT: "0",
@@ -1662,10 +1680,12 @@ function createWindow(): BrowserWindow {
   });
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
+    const devServerUrl = new URL(process.env.VITE_DEV_SERVER_URL as string);
+    devServerUrl.hash = "/draft";
+    void window.loadURL(devServerUrl.toString());
     window.webContents.openDevTools({ mode: "detach" });
   } else {
-    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
+    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html#/draft`);
   }
 
   window.on("closed", () => {

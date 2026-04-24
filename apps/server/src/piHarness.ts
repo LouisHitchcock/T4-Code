@@ -57,6 +57,12 @@ function normalizeString(value: string | null | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+export function resolvePiAgentDir(agentDir?: string): string {
+  return (
+    normalizeString(agentDir) ?? normalizeString(process.env.PI_CODING_AGENT_DIR) ?? getAgentDir()
+  );
+}
+
 type PiSettingsSnapshot = ReturnType<SettingsManager["getGlobalSettings"]>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,7 +88,10 @@ export function createLockedPiSettingsManager(input?: {
   readonly cwd?: string;
   readonly agentDir?: string;
 }): SettingsManager {
-  const fileSettingsManager = SettingsManager.create(input?.cwd, input?.agentDir);
+  const fileSettingsManager = SettingsManager.create(
+    input?.cwd,
+    resolvePiAgentDir(input?.agentDir),
+  );
   const mergedSettings = mergePiSettings(
     fileSettingsManager.getGlobalSettings(),
     fileSettingsManager.getProjectSettings(),
@@ -133,7 +142,7 @@ export function createPiHarnessCatalogSnapshot(input?: {
   readonly authPath?: string;
   readonly modelsPath?: string;
 }): PiHarnessCatalogSnapshot {
-  const agentDir = normalizeString(input?.agentDir) ?? getAgentDir();
+  const agentDir = resolvePiAgentDir(input?.agentDir);
   const authPath = normalizeString(input?.authPath) ?? path.join(agentDir, "auth.json");
   const modelsPath = normalizeString(input?.modelsPath) ?? path.join(agentDir, "models.json");
   const authStorage = AuthStorage.create(authPath);
@@ -176,7 +185,7 @@ export async function createLockedPiResourceLoader(input: {
 }) {
   const resourceLoader = new DefaultResourceLoader({
     cwd: input.cwd,
-    agentDir: normalizeString(input.agentDir) ?? getAgentDir(),
+    agentDir: resolvePiAgentDir(input.agentDir),
     settingsManager: input.settingsManager,
     noExtensions: true,
     noSkills: true,

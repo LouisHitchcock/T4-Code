@@ -8,5 +8,5 @@ export interface CopilotAdapterShape extends ProviderAdapterShape<ProviderAdapte
 }
 
 export class CopilotAdapter extends ServiceMap.Service<CopilotAdapter, CopilotAdapterShape>()(
-  "cut3/provider/Services/CopilotAdapter",
+  "t4code/provider/Services/CopilotAdapter",
 ) {}

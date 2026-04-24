@@ -198,7 +198,7 @@ export interface OpenShape {
 /**
  * Open - Service tag for browser/editor launch operations.
  */
-export class Open extends ServiceMap.Service<Open, OpenShape>()("cut3/open") {}
+export class Open extends ServiceMap.Service<Open, OpenShape>()("t4code/open") {}
 
 // ==============================
 // Implementations

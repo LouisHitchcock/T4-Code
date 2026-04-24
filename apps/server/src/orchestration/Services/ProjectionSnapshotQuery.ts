@@ -31,4 +31,4 @@ export interface ProjectionSnapshotQueryShape {
 export class ProjectionSnapshotQuery extends ServiceMap.Service<
   ProjectionSnapshotQuery,
   ProjectionSnapshotQueryShape
->()("cut3/orchestration/Services/ProjectionSnapshotQuery") {}
+>()("t4code/orchestration/Services/ProjectionSnapshotQuery") {}

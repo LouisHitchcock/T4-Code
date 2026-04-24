@@ -82,8 +82,8 @@ jobs:
             require_signing="${{ github.event.inputs.require_signing }}"
             dry_run="${{ github.event.inputs.dry_run }}"
           else
-            publish_cli="${{ vars.CUT3_PUBLISH_CLI || 'false' }}"
-            require_signing="${{ vars.CUT3_REQUIRE_SIGNING || 'false' }}"
+            publish_cli="${{ vars.T4CODE_PUBLISH_CLI || vars.CUT3_PUBLISH_CLI || 'false' }}"
+            require_signing="${{ vars.T4CODE_REQUIRE_SIGNING || vars.CUT3_REQUIRE_SIGNING || 'false' }}"
             dry_run="false"
           fi
 
@@ -478,7 +478,7 @@ jobs:
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
       - name: Build CLI package
-        run: bun run build --filter=@t3tools/web --filter=cut3
+        run: bun run build --filter=@t3tools/web --filter=t4code
 
       - name: Publish CLI package
         run: node apps/server/scripts/cli.ts publish --tag latest --app-version "${{ needs.preflight.outputs.version }}" --verbose
@@ -546,7 +546,7 @@ jobs:
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
-          name: CUT3 v${{ needs.preflight.outputs.version }}
+          name: T4Code v${{ needs.preflight.outputs.version }}
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
