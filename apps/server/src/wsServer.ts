@@ -393,6 +393,7 @@ class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("Ro
 }) {}
 
 interface BangCommandRunState {
+  runId: string;
   threadId: string;
   terminalId: string;
   commandText: string;
@@ -1232,6 +1233,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     summary: string;
     commandText: string;
     cwd: string;
+    runId: string;
     activityId?: string | undefined;
     detail?: string | undefined;
     exitCode?: number | null | undefined;
@@ -1252,6 +1254,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           itemType: "command_execution",
           requestKind: "command",
           title: "terminal",
+          runId: input.runId,
           ...(input.detail && input.detail.trim().length > 0 ? { detail: input.detail } : {}),
           data: {
             command: input.commandText,
@@ -1287,6 +1290,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             summary: "Running command",
             commandText: runState.commandText,
             cwd: runState.cwd,
+            runId: runState.runId,
             activityId: runState.runningActivityId,
           });
           return;
@@ -1301,6 +1305,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             summary: "Running command",
             commandText: runState.commandText,
             cwd: runState.cwd,
+            runId: runState.runId,
             activityId: runState.runningActivityId,
             detail: runState.outputTail.trim().length > 0 ? runState.outputTail : undefined,
           });
@@ -1316,6 +1321,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             summary: event.exitCode === 0 ? "Command completed" : "Command failed",
             commandText: runState.commandText,
             cwd: runState.cwd,
+            runId: runState.runId,
             detail: runState.outputTail.trim().length > 0 ? runState.outputTail : undefined,
             exitCode: event.exitCode,
             exitSignal: event.exitSignal,
@@ -1336,6 +1342,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             summary: "Command failed",
             commandText: runState.commandText,
             cwd: runState.cwd,
+            runId: runState.runId,
             detail: event.message,
           });
           yield* terminalManager.close({
@@ -1974,6 +1981,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           bangCommandRuns.set(
             bangCommandRunKey(normalizedInput.threadId, normalizedInput.terminalId ?? ""),
             {
+              runId: crypto.randomUUID(),
               threadId: normalizedInput.threadId,
               terminalId: normalizedInput.terminalId ?? "",
               commandText: bangCommandText,

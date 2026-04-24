@@ -9,7 +9,7 @@ describe("getServerConnectionBannerTitle", () => {
   it("uses a desktop-specific connecting title in Electron", () => {
     expect(
       getServerConnectionBannerTitle({ retrying: false, isElectron: true, language: "en" }),
-    ).toContain("Connecting to T4Code");
+    ).toContain("Connecting to Draft");
   });
 
   it("keeps the local server title in the browser", () => {

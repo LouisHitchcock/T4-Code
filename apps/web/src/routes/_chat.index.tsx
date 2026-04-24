@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
 import ThreadNewButton from "../components/ThreadNewButton";
@@ -34,5 +34,8 @@ function ChatIndexRouteView() {
 }
 
 export const Route = createFileRoute("/_chat/")({
+  beforeLoad: () => {
+    throw redirect({ to: "/draft" });
+  },
   component: ChatIndexRouteView,
 });

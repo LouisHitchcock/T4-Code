@@ -7,16 +7,16 @@
       "outputs": ["dist-electron/**"],
     },
     "dev": {
-      "dependsOn": ["cut3#build"],
+      "dependsOn": ["t4code#build"],
       "persistent": true,
     },
     "start": {
-      "dependsOn": ["build", "@t3tools/web#build", "cut3#build"],
+      "dependsOn": ["build", "@t3tools/web#build", "t4code#build"],
       "cache": false,
       "persistent": true,
     },
     "smoke-test": {
-      "dependsOn": ["build", "@t3tools/web#build", "cut3#build"],
+      "dependsOn": ["build", "@t3tools/web#build", "t4code#build"],
       "cache": false,
       "outputs": [],
     },

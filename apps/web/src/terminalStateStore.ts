@@ -14,6 +14,7 @@ import {
   MAX_TERMINALS_PER_GROUP,
   type ThreadTerminalGroup,
 } from "./types";
+export type ThreadTerminalControlState = "agent-attached" | "user-takeover" | "handback-pending";
 
 interface ThreadTerminalState {
   terminalOpen: boolean;
@@ -505,8 +506,45 @@ function updateTerminalStateByThreadId(
   };
 }
 
+export function selectThreadTerminalControlState(
+  terminalControlStateByThreadId: Record<ThreadId, ThreadTerminalControlState>,
+  threadId: ThreadId,
+): ThreadTerminalControlState {
+  if (threadId.length === 0) {
+    return "agent-attached";
+  }
+  return terminalControlStateByThreadId[threadId] ?? "agent-attached";
+}
+
+function updateTerminalControlStateByThreadId(
+  terminalControlStateByThreadId: Record<ThreadId, ThreadTerminalControlState>,
+  threadId: ThreadId,
+  updater: (state: ThreadTerminalControlState) => ThreadTerminalControlState,
+): Record<ThreadId, ThreadTerminalControlState> {
+  if (threadId.length === 0) {
+    return terminalControlStateByThreadId;
+  }
+  const current = selectThreadTerminalControlState(terminalControlStateByThreadId, threadId);
+  const next = updater(current);
+  if (next === current) {
+    return terminalControlStateByThreadId;
+  }
+  if (next === "agent-attached") {
+    if (terminalControlStateByThreadId[threadId] === undefined) {
+      return terminalControlStateByThreadId;
+    }
+    const { [threadId]: _removed, ...rest } = terminalControlStateByThreadId;
+    return rest as Record<ThreadId, ThreadTerminalControlState>;
+  }
+  return {
+    ...terminalControlStateByThreadId,
+    [threadId]: next,
+  };
+}
+
 interface TerminalStateStoreState {
   terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>;
+  terminalControlStateByThreadId: Record<ThreadId, ThreadTerminalControlState>;
   setTerminalOpen: (threadId: ThreadId, open: boolean) => void;
   setTerminalHeight: (threadId: ThreadId, height: number) => void;
   splitTerminal: (threadId: ThreadId, terminalId: string) => void;
@@ -518,6 +556,7 @@ interface TerminalStateStoreState {
     terminalId: string,
     hasRunningSubprocess: boolean,
   ) => void;
+  setTerminalControlState: (threadId: ThreadId, state: ThreadTerminalControlState) => void;
   clearTerminalState: (threadId: ThreadId) => void;
   removeOrphanedTerminalStates: (activeThreadIds: Set<ThreadId>) => void;
 }
@@ -546,6 +585,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
 
       return {
         terminalStateByThreadId: {},
+        terminalControlStateByThreadId: {},
         setTerminalOpen: (threadId, open) =>
           updateTerminal(threadId, (state) => setThreadTerminalOpen(state, open)),
         setTerminalHeight: (threadId, height) =>
@@ -562,19 +602,54 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
           updateTerminal(threadId, (state) =>
             setThreadTerminalActivity(state, terminalId, hasRunningSubprocess),
           ),
+        setTerminalControlState: (threadId, terminalControlState) =>
+          set((state) => {
+            const next = updateTerminalControlStateByThreadId(
+              state.terminalControlStateByThreadId,
+              threadId,
+              () => terminalControlState,
+            );
+            if (next === state.terminalControlStateByThreadId) {
+              return state;
+            }
+            return {
+              terminalControlStateByThreadId: next,
+            };
+          }),
         clearTerminalState: (threadId) =>
-          updateTerminal(threadId, () => createDefaultThreadTerminalState()),
+          set((state) => ({
+            terminalStateByThreadId: updateTerminalStateByThreadId(
+              state.terminalStateByThreadId,
+              threadId,
+              () => createDefaultThreadTerminalState(),
+            ),
+            terminalControlStateByThreadId: updateTerminalControlStateByThreadId(
+              state.terminalControlStateByThreadId,
+              threadId,
+              () => "agent-attached",
+            ),
+          })),
         removeOrphanedTerminalStates: (activeThreadIds) =>
           set((state) => {
             const orphanedIds = Object.keys(state.terminalStateByThreadId).filter(
               (id) => !activeThreadIds.has(id as ThreadId),
             );
-            if (orphanedIds.length === 0) return state;
+            const orphanedControlIds = Object.keys(state.terminalControlStateByThreadId).filter(
+              (id) => !activeThreadIds.has(id as ThreadId),
+            );
+            if (orphanedIds.length === 0 && orphanedControlIds.length === 0) return state;
             const next = { ...state.terminalStateByThreadId };
             for (const id of orphanedIds) {
               delete next[id as ThreadId];
             }
-            return { terminalStateByThreadId: next };
+            const nextControl = { ...state.terminalControlStateByThreadId };
+            for (const id of orphanedControlIds) {
+              delete nextControl[id as ThreadId];
+            }
+            return {
+              terminalStateByThreadId: next,
+              terminalControlStateByThreadId: nextControl,
+            };
           }),
       };
     },
@@ -584,6 +659,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
       storage: createJSONStorage(createTerminalStateStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
+        terminalControlStateByThreadId: state.terminalControlStateByThreadId,
       }),
     },
   ),

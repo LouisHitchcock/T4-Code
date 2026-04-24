@@ -103,6 +103,7 @@ import {
   getModelOptionContextLabel,
   getProviderPickerSectionDescription,
 } from "~/lib/modelPickerHelpers";
+import { normalizeWorkspacePathForComparison } from "../lib/projectPathMatching";
 import { buildComposerMcpServerItems, providerSupportsMcp } from "../mcpServers";
 import { buildModelOptionsForSend } from "../chatDispatchOptions";
 
@@ -256,6 +257,7 @@ import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import {
   ProviderModelPicker,
   PROVIDER_ICON_BY_PROVIDER,
@@ -341,6 +343,7 @@ import { findMatchingApprovalRule, type ApprovalRule } from "../approvalRules";
 import { formatTimestamp } from "../timestampFormat";
 import { buildBangCommandTerminalId } from "@t3tools/shared/terminalRun";
 import { showTurnCompleteNotification } from "../notifications";
+import { resolvePathLinkTarget } from "../terminal-links";
 
 const LAST_EDITOR_KEY = "t4code:last-editor";
 const LEGACY_LAST_EDITOR_KEY = "cut3:last-editor";
@@ -371,6 +374,7 @@ const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnsw
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+const TERMINAL_DIRECTORY_EXPLORER_LIMIT = 120;
 
 function buildComposerActivitySubtext(context: ActiveThinkingContext): string | null {
   if (!context.live || context.kind === "idle") {
@@ -978,6 +982,103 @@ const extendReplacementRangeForTrailingSpace = (
   return text[rangeEnd] === " " ? rangeEnd + 1 : rangeEnd;
 };
 
+function isComposerBangModePrompt(text: string): boolean {
+  return text.trimStart().startsWith("!");
+}
+
+function parseStandaloneBangCdTarget(commandText: string): string | null | undefined {
+  const trimmed = commandText.trim();
+  if (!/^cd(?:\s|$)/i.test(trimmed)) {
+    return undefined;
+  }
+
+  const remainder = trimmed.slice(2).trim();
+  if (remainder.length === 0) {
+    return null;
+  }
+  if (/[;&|><]/.test(remainder)) {
+    return undefined;
+  }
+
+  if (
+    (remainder.startsWith("\"") && remainder.endsWith("\"")) ||
+    (remainder.startsWith("'") && remainder.endsWith("'"))
+  ) {
+    return remainder.slice(1, -1).trim();
+  }
+
+  if (/\s/.test(remainder)) {
+    return undefined;
+  }
+
+  return remainder;
+}
+
+function normalizeWorkspacePath(pathValue: string): string {
+  return normalizeWorkspacePathForComparison(pathValue) ?? pathValue;
+}
+
+function resolveBangModeTargetCwd(input: {
+  baseCwd: string;
+  defaultCwd: string;
+  target: string | null;
+}): string {
+  if (input.target === null || input.target.length === 0 || input.target === "~") {
+    return normalizeWorkspacePath(input.defaultCwd);
+  }
+
+  const resolvedPath = resolvePathLinkTarget(input.target, input.baseCwd);
+  if (input.target.startsWith("~/") && resolvedPath.startsWith("~/")) {
+    throw new Error("Unable to resolve ~/ from the current workspace path.");
+  }
+  return normalizeWorkspacePath(resolvedPath);
+}
+
+function resolveParentDirectoryPath(pathValue: string): string | null {
+  const normalizedPath = normalizeWorkspacePathForComparison(pathValue);
+  if (!normalizedPath || normalizedPath === "." || normalizedPath === "/") {
+    return null;
+  }
+
+  if (normalizedPath.startsWith("//")) {
+    const uncMatch = normalizedPath.match(/^(\/\/[^/]+\/[^/]+)(?:\/(.*))?$/);
+    if (!uncMatch) {
+      return null;
+    }
+    const root = uncMatch[1] ?? "";
+    const remainder = uncMatch[2] ?? "";
+    if (!remainder) {
+      return null;
+    }
+    const parentRemainder = remainder.split("/").slice(0, -1).join("/");
+    return parentRemainder ? `${root}/${parentRemainder}` : root;
+  }
+
+  const driveMatch = normalizedPath.match(/^([a-z]:)(?:\/(.*))?$/);
+  if (driveMatch) {
+    const drive = driveMatch[1] ?? "";
+    const remainder = driveMatch[2] ?? "";
+    if (!remainder) {
+      return null;
+    }
+    const parentRemainder = remainder.split("/").slice(0, -1).join("/");
+    return parentRemainder ? `${drive}/${parentRemainder}` : `${drive}/`;
+  }
+
+  const trimmed = normalizedPath.replace(/\/+$/, "");
+  if (trimmed.length === 0 || trimmed === "/") {
+    return null;
+  }
+  const segments = trimmed.split("/").filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
+    return null;
+  }
+  if (segments.length === 1) {
+    return "/";
+  }
+  return `/${segments.slice(0, -1).join("/")}`;
+}
+
 interface ChatViewProps {
   threadId: ThreadId;
 }
@@ -1064,6 +1165,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [followUpModeByThreadId, setFollowUpModeByThreadId] = useState<
     Record<string, "queue" | "steer">
   >({});
+  const [bangCommandCwdByThreadId, setBangCommandCwdByThreadId] = useState<
+    Record<string, string>
+  >({});
+  const [isTerminalCwdExplorerOpen, setIsTerminalCwdExplorerOpen] = useState(false);
+  const [terminalCwdExplorerCwd, setTerminalCwdExplorerCwd] = useState<string | null>(null);
+  const [terminalCwdExplorerSearch, setTerminalCwdExplorerSearch] = useState("");
   const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [pendingInterruptRequest, setPendingInterruptRequest] = useState<{
@@ -1223,6 +1330,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       existing[targetThreadId] === nextMode
         ? existing
         : { ...existing, [targetThreadId]: nextMode },
+    );
+  }, []);
+  const setBangCommandCwd = useCallback((targetThreadId: ThreadId, nextCwd: string) => {
+    const normalizedNextCwd = normalizeWorkspacePath(nextCwd);
+    setBangCommandCwdByThreadId((existing) =>
+      existing[targetThreadId] === normalizedNextCwd
+        ? existing
+        : { ...existing, [targetThreadId]: normalizedNextCwd },
     );
   }, []);
   const sendPhase = sendPhaseByThreadId[threadId] ?? "idle";
@@ -2776,6 +2891,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
   const gitCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
   const activeWorkspaceCwd = gitCwd ?? activeProject?.cwd ?? null;
+  const defaultBangCommandCwd = gitCwd ?? activeProject?.cwd ?? null;
+  const activeBangCommandCwd =
+    (activeThread ? bangCommandCwdByThreadId[activeThread.id] : null) ?? defaultBangCommandCwd;
+  const isTerminalComposerMode = isComposerBangModePrompt(prompt);
+  const terminalModeCommandDraft = isTerminalComposerMode ? prompt.trimStart().slice(1) : "";
   const activeServerThreadId = serverThread?.id ?? null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
@@ -2862,6 +2982,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const terminalCwdExplorerQuery =
+    terminalCwdExplorerSearch.trim().length > 0 ? terminalCwdExplorerSearch.trim() : ".";
+  const terminalCwdExplorerEntriesQuery = useQuery(
+    projectSearchEntriesQueryOptions({
+      cwd: terminalCwdExplorerCwd,
+      query: terminalCwdExplorerQuery,
+      enabled: isTerminalCwdExplorerOpen && terminalCwdExplorerCwd !== null,
+      limit: TERMINAL_DIRECTORY_EXPLORER_LIMIT,
+    }),
+  );
+  const terminalCwdExplorerDirectories = useMemo(() => {
+    const entries = terminalCwdExplorerEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+    const hasQuery = terminalCwdExplorerSearch.trim().length > 0;
+    return entries.filter(
+      (entry) => entry.kind === "directory" && (hasQuery || entry.parentPath === undefined),
+    );
+  }, [terminalCwdExplorerEntriesQuery.data?.entries, terminalCwdExplorerSearch]);
+  const terminalCwdExplorerParentPath = useMemo(
+    () =>
+      terminalCwdExplorerCwd ? resolveParentDirectoryPath(terminalCwdExplorerCwd) : null,
+    [terminalCwdExplorerCwd],
+  );
   const projectSkills = projectSkillsQuery.data?.skills ?? EMPTY_PROJECT_SKILLS;
   const projectSkillIssues = projectSkillsQuery.data?.issues ?? EMPTY_PROJECT_SKILL_ISSUES;
   const projectCommandTemplates =
@@ -3289,6 +3431,63 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [setStoreThreadError, threads],
   );
+  const selectTerminalCwd = useCallback(
+    (nextCwd: string, options?: { showToast?: boolean }) => {
+      if (!activeThreadId) {
+        return;
+      }
+      const normalizedCwd = normalizeWorkspacePath(nextCwd);
+      setBangCommandCwd(activeThreadId, normalizedCwd);
+      if (options?.showToast !== false) {
+        toastManager.add({
+          type: "success",
+          title: "Terminal directory updated",
+          description: normalizedCwd,
+        });
+      }
+    },
+    [activeThreadId, setBangCommandCwd],
+  );
+  const openTerminalCwdExplorer = useCallback(() => {
+    if (!activeBangCommandCwd) {
+      return;
+    }
+    setTerminalCwdExplorerSearch("");
+    setTerminalCwdExplorerCwd(activeBangCommandCwd);
+    setIsTerminalCwdExplorerOpen(true);
+  }, [activeBangCommandCwd]);
+  const closeTerminalCwdExplorer = useCallback(() => {
+    setIsTerminalCwdExplorerOpen(false);
+    setTerminalCwdExplorerSearch("");
+    setTerminalCwdExplorerCwd(null);
+  }, []);
+  const navigateTerminalCwdExplorerParent = useCallback(() => {
+    if (!terminalCwdExplorerParentPath) {
+      return;
+    }
+    setTerminalCwdExplorerCwd(terminalCwdExplorerParentPath);
+    setTerminalCwdExplorerSearch("");
+  }, [terminalCwdExplorerParentPath]);
+  const navigateTerminalCwdExplorerDirectory = useCallback(
+    (relativePath: string) => {
+      if (!terminalCwdExplorerCwd) {
+        return;
+      }
+      const nextCwd = normalizeWorkspacePath(
+        resolvePathLinkTarget(relativePath, terminalCwdExplorerCwd),
+      );
+      setTerminalCwdExplorerCwd(nextCwd);
+      setTerminalCwdExplorerSearch("");
+    },
+    [terminalCwdExplorerCwd],
+  );
+  const chooseTerminalCwdFromExplorer = useCallback(() => {
+    if (!terminalCwdExplorerCwd) {
+      return;
+    }
+    selectTerminalCwd(terminalCwdExplorerCwd, { showToast: false });
+    closeTerminalCwdExplorer();
+  }, [closeTerminalCwdExplorer, selectTerminalCwd, terminalCwdExplorerCwd]);
 
   const focusComposer = useCallback(() => {
     composerEditorRef.current?.focusAtEnd();
@@ -4830,6 +5029,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         composerImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
       const standaloneBangCommand =
         composerImages.length === 0 ? parseStandaloneComposerBangCommand(trimmed) : null;
+      const isBangModePrompt = composerImages.length === 0 && isComposerBangModePrompt(trimmed);
       if (standaloneSlashCommand) {
         if (options?.allowStandaloneCommands === false) {
           toastManager.add({
@@ -4864,6 +5064,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
           kind: "bang-command" as const,
           commandText: standaloneBangCommand,
         };
+      }
+      if (isBangModePrompt) {
+        toastManager.add({
+          type: "info",
+          title: "Terminal mode active",
+          description:
+            "Type a shell command after ! (for example ! bun run test) or remove ! to return to agent mode.",
+        });
+        return null;
       }
 
       const standaloneSlashInvocation =
@@ -5016,10 +5225,44 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (!api || !activeThreadId || !activeProject || !activeThread) {
         return;
       }
+      const baseCwd = activeBangCommandCwd ?? gitCwd ?? activeProject.cwd;
+      const fallbackCwd = defaultBangCommandCwd ?? activeProject.cwd;
+      const bangCdTarget = parseStandaloneBangCdTarget(commandText);
+      if (bangCdTarget !== undefined) {
+        if (bangCdTarget === "-") {
+          toastManager.add({
+            type: "warning",
+            title: "Unsupported terminal directory shortcut",
+            description: "Using \"cd -\" in terminal mode isn't supported yet.",
+          });
+          return;
+        }
+        try {
+          const nextCwd = resolveBangModeTargetCwd({
+            baseCwd,
+            defaultCwd: fallbackCwd,
+            target: bangCdTarget,
+          });
+          await api.projects.searchEntries({
+            cwd: nextCwd,
+            query: ".",
+            limit: 1,
+          });
+          setThreadError(activeThreadId, null);
+          selectTerminalCwd(nextCwd);
+          clearComposerAfterSendCapture(activeThreadId);
+        } catch (error) {
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to change terminal directory.",
+          );
+        }
+        return;
+      }
 
       beginSendPhase(activeThreadId, "sending-turn");
       setThreadError(activeThreadId, null);
-      const targetCwd = gitCwd ?? activeProject.cwd;
+      const targetCwd = baseCwd;
       const runtimeEnv = projectScriptRuntimeEnv({
         project: {
           cwd: activeProject.cwd,
@@ -5074,17 +5317,87 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     },
     [
+      activeBangCommandCwd,
       activeProject,
       activeThread,
       activeThreadId,
       beginSendPhase,
       clearComposerAfterSendCapture,
+      defaultBangCommandCwd,
       gitCwd,
       interactionMode,
       isLocalDraftThread,
       resetSendPhase,
       runtimeMode,
+      selectTerminalCwd,
       setThreadError,
+    ],
+  );
+  const openCommandInTerminalDrawer = useCallback(
+    async (commandText: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThreadId || !activeProject || !activeThread) {
+        return;
+      }
+
+      const targetCwd = activeBangCommandCwd ?? gitCwd ?? activeProject.cwd;
+      const baseTerminalId =
+        terminalState.activeTerminalId ||
+        terminalState.terminalIds[0] ||
+        DEFAULT_THREAD_TERMINAL_ID;
+      const shouldCreateNewTerminal = terminalState.runningTerminalIds.includes(baseTerminalId);
+      const targetTerminalId = shouldCreateNewTerminal
+        ? `terminal-${randomUUID()}`
+        : baseTerminalId;
+
+      setTerminalOpen(true);
+      if (shouldCreateNewTerminal) {
+        storeNewTerminal(activeThreadId, targetTerminalId);
+      } else {
+        storeSetActiveTerminal(activeThreadId, targetTerminalId);
+      }
+      setTerminalFocusRequestId((value) => value + 1);
+
+      const runtimeEnv = projectScriptRuntimeEnv({
+        project: {
+          cwd: activeProject.cwd,
+        },
+        worktreePath: activeThread.worktreePath ?? null,
+      });
+
+      try {
+        await api.terminal.open({
+          threadId: activeThreadId,
+          terminalId: targetTerminalId,
+          cwd: targetCwd,
+          env: runtimeEnv,
+          cols: SCRIPT_TERMINAL_COLS,
+          rows: SCRIPT_TERMINAL_ROWS,
+        });
+        await api.terminal.write({
+          threadId: activeThreadId,
+          terminalId: targetTerminalId,
+          data: `${commandText}\r`,
+        });
+      } catch (error) {
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : "Failed to open terminal command.",
+        );
+      }
+    },
+    [
+      activeBangCommandCwd,
+      activeProject,
+      activeThread,
+      activeThreadId,
+      gitCwd,
+      setTerminalOpen,
+      setThreadError,
+      storeNewTerminal,
+      storeSetActiveTerminal,
+      terminalState.activeTerminalId,
+      terminalState.runningTerminalIds,
     ],
   );
 
@@ -6869,36 +7182,155 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onTouchEnd={onMessagesTouchEnd}
                 onTouchCancel={onMessagesTouchEnd}
               >
-                <MessagesTimeline
-                  key={activeThread.id}
-                  hasMessages={timelineEntries.length > 0}
-                  isWorking={isWorking}
-                  activeTurnInProgress={isWorking || !latestTurnSettled}
-                  activeTurnStartedAt={activeWorkStartedAt}
-                  scrollContainer={messagesScrollElement}
-                  timelineEntries={timelineEntries}
-                  completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-                  completionSummary={completionSummary}
-                  turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-                  workLogTurnDiffSummaryByTurnId={workLogTurnDiffSummaryByTurnId}
-                  nowIso={nowIso}
-                  expandedWorkGroups={expandedWorkGroups}
-                  onToggleWorkGroup={onToggleWorkGroup}
-                  onOpenTurnDiff={onOpenTurnDiff}
-                  revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                  onRevertUserMessage={onRevertUserMessage}
-                  onForkMessage={onForkMessage}
-                  isForkingThread={isForkingThread}
-                  isRevertingCheckpoint={isRevertingCheckpoint}
-                  onImageExpand={onExpandTimelineImage}
-                  markdownCwd={gitCwd ?? undefined}
-                  resolvedTheme={resolvedTheme}
-                  timestampFormat={timestampFormat}
-                  workspaceRoot={activeProject?.cwd ?? undefined}
-                  emptyStateLabel={chatCopy.sendMessageToStart}
-                  workingLabel={chatCopy.working}
-                  formatWorkingLabel={chatCopy.workingFor}
-                />
+                <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-3">
+                  <section
+                    data-chat-workspace-shell="true"
+                    className="overflow-hidden rounded-[28px] border border-border/70 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--card)_92%,transparent),color-mix(in_srgb,var(--background)_96%,transparent))] shadow-[0_28px_80px_-54px_--alpha(var(--color-black)/34%)] backdrop-blur-xl"
+                  >
+                    <div className="border-b border-border/55 px-4 py-3 sm:px-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/72">
+                              Workspace
+                            </span>
+                            {activeProject?.name ? (
+                              <span className="truncate text-sm font-medium text-foreground/92">
+                                {activeProject.name}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/72">
+                            <span className="rounded-full border border-border/50 bg-background/55 px-2 py-0.5 uppercase tracking-[0.12em]">
+                              Thread
+                            </span>
+                            <span className="truncate text-foreground/86">{activeThread.title}</span>
+                            {(activeThread.worktreePath ?? activeProject?.cwd) ? (
+                              <>
+                                <span className="text-muted-foreground/45">•</span>
+                                <code
+                                  className="truncate font-mono text-[11px] text-foreground/68"
+                                  title={activeThread.worktreePath ?? activeProject?.cwd ?? undefined}
+                                >
+                                  {activeThread.worktreePath ?? activeProject?.cwd}
+                                </code>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-2 text-[11px]">
+                          <span className="rounded-full border border-border/55 bg-background/70 px-2.5 py-1 font-medium text-foreground/86">
+                            {interactionMode === "default" ? "Agent" : "Plan"}
+                          </span>
+                          <span className="rounded-full border border-border/55 bg-background/70 px-2.5 py-1 font-medium text-foreground/86">
+                            {runtimeMode === "full-access"
+                              ? "Full access"
+                              : "Approval required"}
+                          </span>
+                          <span className="rounded-full border border-border/55 bg-background/70 px-2.5 py-1 font-medium text-foreground/86">
+                            {terminalState.terminalOpen
+                              ? `${terminalState.terminalIds.length} terminal${
+                                  terminalState.terminalIds.length === 1 ? "" : "s"
+                                } docked`
+                              : "Terminal hidden"}
+                          </span>
+                          <span
+                            className={cn(
+                              "rounded-full border px-2.5 py-1 font-medium",
+                              isWorking
+                                ? "border-emerald-400/30 bg-emerald-500/[0.12] text-emerald-300"
+                                : "border-border/55 bg-background/70 text-muted-foreground/78",
+                            )}
+                          >
+                            {isWorking ? "Live activity" : "Idle"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/72">
+                        <span className="rounded-full border border-border/55 bg-background/60 px-2 py-0.5 uppercase tracking-[0.12em]">
+                          Active mode
+                        </span>
+                        <span className="text-foreground/86">
+                          {isTerminalComposerMode
+                            ? "Terminal-first command flow"
+                            : "Agent-first conversational flow"}
+                        </span>
+                        {isTerminalComposerMode && activeBangCommandCwd ? (
+                          <code
+                            className="truncate rounded-full border border-border/50 bg-background/58 px-2 py-0.5 font-mono text-[11px] text-foreground/72"
+                            title={activeBangCommandCwd}
+                          >
+                            {activeBangCommandCwd}
+                          </code>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/68 sm:justify-end">
+                        <span>Terminal blocks stay inline in the timeline.</span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div
+                    data-chat-workstream="true"
+                    className="overflow-hidden rounded-[30px] border border-border/60 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_86%,transparent),color-mix(in_srgb,var(--card)_96%,transparent))] shadow-[0_34px_100px_-68px_--alpha(var(--color-black)/34%)] backdrop-blur-xl"
+                  >
+                    <div className="border-b border-border/50 px-4 py-3 sm:px-5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="rounded-full border border-border/60 bg-background/65 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/72">
+                            Workstream
+                          </span>
+                          <span className="truncate text-sm font-medium text-foreground/92">
+                            Commands, tool output, and replies in one flow
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground/68">
+                          <span>{timelineEntries.length} entries</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-2 py-3 sm:px-3 sm:py-4">
+                      <MessagesTimeline
+                        key={activeThread.id}
+                        hasMessages={timelineEntries.length > 0}
+                        isWorking={isWorking}
+                        activeTurnInProgress={isWorking || !latestTurnSettled}
+                        activeTurnStartedAt={activeWorkStartedAt}
+                        scrollContainer={messagesScrollElement}
+                        timelineEntries={timelineEntries}
+                        completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+                        completionSummary={completionSummary}
+                        turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                        workLogTurnDiffSummaryByTurnId={workLogTurnDiffSummaryByTurnId}
+                        nowIso={nowIso}
+                        expandedWorkGroups={expandedWorkGroups}
+                        onToggleWorkGroup={onToggleWorkGroup}
+                        onOpenTurnDiff={onOpenTurnDiff}
+                        revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                        onRevertUserMessage={onRevertUserMessage}
+                        onForkMessage={onForkMessage}
+                        isForkingThread={isForkingThread}
+                        isRevertingCheckpoint={isRevertingCheckpoint}
+                        onImageExpand={onExpandTimelineImage}
+                        markdownCwd={gitCwd ?? undefined}
+                        resolvedTheme={resolvedTheme}
+                        timestampFormat={timestampFormat}
+                        workspaceRoot={activeProject?.cwd ?? undefined}
+                        emptyStateLabel={chatCopy.sendMessageToStart}
+                        workingLabel={chatCopy.working}
+                        formatWorkingLabel={chatCopy.workingFor}
+                        onRerunCommand={(command) => {
+                          void runStandaloneBangCommand(command);
+                        }}
+                        onOpenCommandInTerminal={(command) => {
+                          void openCommandInTerminalDrawer(command);
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {showScrollToBottom && (
@@ -6924,8 +7356,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             )}
           >
             {composerActivitySubtext ? (
-              <div className="mx-auto mb-1 w-full max-w-5xl px-1.5 text-[11px] text-muted-foreground/75 sm:px-2.5">
-                <div className="flex items-center gap-1.5">
+              <div className="mx-auto mb-2 w-full max-w-6xl px-1.5 text-[11px] sm:px-2.5">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-background/72 px-3 py-1.5 text-muted-foreground/80 shadow-[0_10px_24px_-20px_--alpha(var(--color-black)/20%)] backdrop-blur-xl">
+                  <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-foreground/55" />
                   <span className="truncate">{composerActivitySubtext}</span>
                   {composerActivityElapsed ? (
                     <span className="shrink-0 text-muted-foreground/60">{composerActivityElapsed}</span>
@@ -6936,12 +7369,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
             <form
               ref={composerFormRef}
               onSubmit={onSend}
-              className="mx-auto w-full min-w-0 max-w-5xl"
+              className="mx-auto w-full min-w-0 max-w-6xl"
               data-chat-composer-form="true"
             >
               <div
                 data-chat-composer-surface="true"
-                className={`group app-interactive-motion rounded-[20px] border bg-card focus-within:border-ring/45 ${
+                className={`group app-interactive-motion overflow-hidden rounded-[28px] border bg-[linear-gradient(180deg,color-mix(in_srgb,var(--card)_94%,transparent),color-mix(in_srgb,var(--background)_96%,transparent))] shadow-[0_26px_72px_-48px_--alpha(var(--color-black)/28%)] backdrop-blur-xl focus-within:border-ring/45 ${
                   isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border"
                 }`}
                 onDragEnter={onComposerDragEnter}
@@ -7235,6 +7668,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         </div>
                       </div>
                     )}
+                  {!isComposerApprovalState && pendingUserInputs.length === 0 ? (
+                  <div
+                      data-chat-composer-mode="true"
+                      className="mb-3 flex flex-wrap items-center gap-2 text-[11px]"
+                    >
+                      <Badge
+                        variant={isTerminalComposerMode ? "warning" : "outline"}
+                        className="rounded-full px-2.5 py-0.5"
+                      >
+                        {isTerminalComposerMode ? "Terminal mode" : "Agent mode"}
+                      </Badge>
+                      <span className="rounded-full border border-border/55 bg-background/60 px-2.5 py-0.5 text-muted-foreground/72">
+                        {interactionMode === "default" ? "Conversation" : "Planning"}
+                      </span>
+                      <span className="rounded-full border border-border/55 bg-background/60 px-2.5 py-0.5 text-muted-foreground/72">
+                        {runtimeMode === "full-access"
+                          ? "Full access"
+                          : "Approval required"}
+                      </span>
+                      {isTerminalComposerMode && activeBangCommandCwd ? (
+                        <>
+                          <button
+                            type="button"
+                            data-chat-composer-control="terminal-cwd"
+                            className="max-w-full truncate rounded-full border border-border/70 bg-background/72 px-3 py-1 text-left font-mono text-[11px] text-foreground/85 transition hover:border-border hover:bg-muted/40"
+                            title={activeBangCommandCwd}
+                            onClick={openTerminalCwdExplorer}
+                          >
+                            cwd {activeBangCommandCwd}
+                          </button>
+                          {terminalModeCommandDraft.trim().length === 0 ? (
+                            <span className="text-muted-foreground/70">
+                              Start with <code>!</code> to run inline shell commands.
+                            </span>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <ComposerPromptEditor
                     ref={composerEditorRef}
                     value={
@@ -7256,6 +7728,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           ? "Type your own answer, or leave this blank to use the selected option"
                           : showPlanFollowUpPrompt && activeProposedPlan
                             ? "Add feedback to refine the plan, or leave this blank to implement it"
+                            : isTerminalComposerMode
+                              ? "Run shell commands with ! (example: ! bun run test or ! cd src)"
                             : phase === "disconnected"
                               ? "Ask for follow-up changes or attach images"
                               : "Ask anything, @tag files/folders, or use / to show available commands"
@@ -7837,6 +8311,102 @@ export default function ChatView({ threadId }: ChatViewProps) {
             onSaveToWorkspace={onSaveThreadExportToWorkspace}
             isSavingToWorkspace={isSavingThreadExport}
           />
+          <Dialog
+            open={isTerminalCwdExplorerOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                closeTerminalCwdExplorer();
+              }
+            }}
+          >
+            <DialogPopup className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Terminal directory</DialogTitle>
+                <DialogDescription>
+                  Browse folders and choose where standalone ! commands should run.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogPanel className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    disabled={!terminalCwdExplorerParentPath}
+                    onClick={navigateTerminalCwdExplorerParent}
+                  >
+                    Up
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    disabled={!terminalCwdExplorerCwd}
+                    onClick={chooseTerminalCwdFromExplorer}
+                  >
+                    Use current directory
+                  </Button>
+                  <div className="min-w-0 flex-1 truncate rounded-md border border-border/70 bg-muted/25 px-2 py-1 font-mono text-[11px] text-foreground/80">
+                    {terminalCwdExplorerCwd ?? "No directory selected"}
+                  </div>
+                </div>
+                <Input
+                  type="search"
+                  value={terminalCwdExplorerSearch}
+                  onChange={(event) => setTerminalCwdExplorerSearch(event.target.value)}
+                  placeholder="Search directories (leave blank for this folder)"
+                />
+                <div className="max-h-72 overflow-y-auto rounded-lg border border-border/70 bg-background/60">
+                  {terminalCwdExplorerEntriesQuery.isLoading ||
+                  terminalCwdExplorerEntriesQuery.isFetching ? (
+                    <p className="px-3 py-2 text-muted-foreground/70 text-xs">
+                      Loading directories...
+                    </p>
+                  ) : terminalCwdExplorerEntriesQuery.isError ? (
+                    <p className="px-3 py-2 text-destructive text-xs">
+                      {terminalCwdExplorerEntriesQuery.error instanceof Error
+                        ? terminalCwdExplorerEntriesQuery.error.message
+                        : "Unable to load directories."}
+                    </p>
+                  ) : terminalCwdExplorerDirectories.length > 0 ? (
+                    <div className="divide-y divide-border/60">
+                      {terminalCwdExplorerDirectories.map((entry) => (
+                        <button
+                          key={entry.path}
+                          type="button"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-muted/35"
+                          onClick={() => navigateTerminalCwdExplorerDirectory(entry.path)}
+                        >
+                          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/80" />
+                          <span className="min-w-0 flex-1 truncate font-mono text-foreground/90">
+                            {entry.path}
+                          </span>
+                          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="px-3 py-2 text-muted-foreground/70 text-xs">
+                      No matching directories.
+                    </p>
+                  )}
+                </div>
+              </DialogPanel>
+              <DialogFooter>
+                <Button type="button" size="sm" variant="outline" onClick={closeTerminalCwdExplorer}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!terminalCwdExplorerCwd}
+                  onClick={chooseTerminalCwdFromExplorer}
+                >
+                  Use current directory
+                </Button>
+              </DialogFooter>
+            </DialogPopup>
+          </Dialog>
         </div>
         {/* end chat column */}
 
@@ -8653,79 +9223,6 @@ const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel(
   );
 });
 
-interface ComposerPendingApprovalActionsProps {
-  requestId: ApprovalRequestId;
-  isResponding: boolean;
-  submittingLabel: string;
-  onRespondToApproval: (
-    requestId: ApprovalRequestId,
-    decision: ProviderApprovalDecision,
-  ) => Promise<void>;
-}
-
-const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
-  requestId,
-  isResponding,
-  submittingLabel,
-  onRespondToApproval,
-}: ComposerPendingApprovalActionsProps) {
-  return (
-    <>
-      <Button
-        size="sm"
-        variant="ghost"
-        type="button"
-        disabled={isResponding}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void onRespondToApproval(requestId, "cancel");
-        }}
-      >
-        {isResponding ? submittingLabel : "Cancel approval"}
-      </Button>
-      <Button
-        size="sm"
-        variant="destructive-outline"
-        type="button"
-        disabled={isResponding}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void onRespondToApproval(requestId, "decline");
-        }}
-      >
-        {isResponding ? submittingLabel : "Decline"}
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        type="button"
-        disabled={isResponding}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void onRespondToApproval(requestId, "acceptForSession");
-        }}
-      >
-        {isResponding ? submittingLabel : "Always allow this session"}
-      </Button>
-      <Button
-        size="sm"
-        variant="default"
-        type="button"
-        disabled={isResponding}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void onRespondToApproval(requestId, "accept");
-        }}
-      >
-        {isResponding ? submittingLabel : "Approve once"}
-      </Button>
-    </>
-  );
-});
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];

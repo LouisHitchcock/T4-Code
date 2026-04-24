@@ -13,6 +13,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckCircle2Icon,
+  CopyIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -25,6 +26,7 @@ import {
   Undo2Icon,
   WrenchIcon,
   ZapIcon,
+  PlayIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
@@ -36,7 +38,9 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
+  commandLifecycleDisplayLabel,
   computeMessageDurationStart,
+  deriveCommandLifecycleState,
   deriveTimelineWorkEntryVisualState,
   formatWorkingTimer,
   isCommandWorkEntry,
@@ -46,6 +50,7 @@ import {
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "../../appSettings";
 import { formatTimestamp } from "../../timestampFormat";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
@@ -78,6 +83,8 @@ interface MessagesTimelineProps {
   emptyStateLabel: string;
   workingLabel: string;
   formatWorkingLabel: (duration: string) => string;
+  onRerunCommand: (command: string) => void;
+  onOpenCommandInTerminal: (command: string) => void;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -108,6 +115,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   emptyStateLabel,
   workingLabel,
   formatWorkingLabel,
+  onRerunCommand,
+  onOpenCommandInTerminal,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
@@ -151,12 +160,31 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       if (timelineEntry.kind === "work") {
         if (isCommandWorkEntry(timelineEntry.entry)) {
+          const runEntries = [timelineEntry.entry];
+          let cursor = index + 1;
+          while (cursor < timelineEntries.length) {
+            const nextEntry = timelineEntries[cursor];
+            if (!nextEntry || nextEntry.kind !== "work" || !isCommandWorkEntry(nextEntry.entry)) {
+              break;
+            }
+            const canMerge =
+              timelineEntry.entry.runId !== undefined &&
+              nextEntry.entry.runId === timelineEntry.entry.runId;
+            if (!canMerge) {
+              break;
+            }
+            runEntries.push(nextEntry.entry);
+            cursor += 1;
+          }
+          const latestEntry = runEntries[runEntries.length - 1] ?? timelineEntry.entry;
           nextRows.push({
-            kind: "command-work",
-            id: timelineEntry.id,
-            createdAt: timelineEntry.createdAt,
-            entry: timelineEntry.entry,
+            kind: "command-run",
+            id: timelineEntry.entry.runId ?? timelineEntry.id,
+            startedAt: runEntries[0]?.createdAt ?? timelineEntry.createdAt,
+            createdAt: runEntries[0]?.createdAt ?? timelineEntry.createdAt,
+            latestEntry,
           });
+          index = cursor - 1;
           continue;
         }
         const groupedEntries = [timelineEntry.entry];
@@ -205,7 +233,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       });
     }
 
-    const hasWorkRows = nextRows.some((row) => row.kind === "work" || row.kind === "command-work");
+    const hasWorkRows = nextRows.some((row) => row.kind === "work" || row.kind === "command-run");
 
     if (isWorking && !hasWorkRows) {
       nextRows.push({
@@ -270,7 +298,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       if (row.kind === "work") return 112;
-      if (row.kind === "command-work") return 172;
+      if (row.kind === "command-run") return 196;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
@@ -447,15 +475,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           );
         })()}
 
-      {row.kind === "command-work" && (
+      {row.kind === "command-run" && (
         <InlineCommandEntryRow
-          workEntry={row.entry}
+          workEntry={row.latestEntry}
+          startedAt={row.startedAt}
           isOutputExpanded={
-            expandedCommandOutputByEntryId[row.entry.id] ??
-            (typeof row.entry.detail === "string" && row.entry.detail.trim().length > 0)
+            expandedCommandOutputByEntryId[row.latestEntry.id] ??
+            (typeof row.latestEntry.detail === "string" && row.latestEntry.detail.trim().length > 0)
           }
-          onOutputExpandedChange={(expanded) => onSetCommandOutputExpanded(row.entry.id, expanded)}
+          onOutputExpandedChange={(expanded) =>
+            onSetCommandOutputExpanded(row.latestEntry.id, expanded)
+          }
           timestampFormat={timestampFormat}
+          onRerunCommand={onRerunCommand}
+          onOpenCommandInTerminal={onOpenCommandInTerminal}
         />
       )}
 
@@ -739,10 +772,11 @@ type TimelineRow =
       groupedEntries: TimelineWorkEntry[];
     }
   | {
-      kind: "command-work";
+      kind: "command-run";
       id: string;
       createdAt: string;
-      entry: TimelineWorkEntry;
+      startedAt: string;
+      latestEntry: TimelineWorkEntry;
     }
   | {
       kind: "message";
@@ -900,9 +934,16 @@ function workEntryPreviewClass(
 }
 
 function inlineCommandStatusLabel(workEntry: TimelineWorkEntry): string {
-  if (workEntry.tone === "error") return "Failed";
-  if (workEntry.label.trim().toLowerCase() === "running command") return "Live";
-  return "Done";
+  const lifecycleState = deriveCommandLifecycleState({
+    tone: workEntry.tone,
+    label: workEntry.label,
+    activityKind: workEntry.activityKind,
+    exitCode: workEntry.exitCode,
+  });
+  if (typeof workEntry.exitCode === "number" && workEntry.exitCode !== 0) {
+    return `Exit ${workEntry.exitCode}`;
+  }
+  return commandLifecycleDisplayLabel(lifecycleState);
 }
 
 function inlineCommandHeading(workEntry: TimelineWorkEntry): string {
@@ -913,48 +954,80 @@ function inlineCommandHeading(workEntry: TimelineWorkEntry): string {
 
 const InlineCommandEntryRow = memo(function InlineCommandEntryRow(props: {
   workEntry: TimelineWorkEntry;
+  startedAt: string;
   isOutputExpanded: boolean;
   onOutputExpandedChange: (expanded: boolean) => void;
   timestampFormat: TimestampFormat;
+  onRerunCommand: (command: string) => void;
+  onOpenCommandInTerminal: (command: string) => void;
 }) {
-  const { workEntry, isOutputExpanded, onOutputExpandedChange, timestampFormat } = props;
+  const {
+    workEntry,
+    startedAt,
+    isOutputExpanded,
+    onOutputExpandedChange,
+    timestampFormat,
+    onRerunCommand,
+    onOpenCommandInTerminal,
+  } = props;
   const heading = inlineCommandHeading(workEntry);
   const statusLabel = inlineCommandStatusLabel(workEntry);
   const output = workEntry.detail?.trimEnd() ?? "";
   const hasOutput = output.length > 0;
+  const cwd = workEntry.cwd?.trim() ?? "";
+  const durationLabel =
+    startedAt !== workEntry.createdAt ? formatElapsed(startedAt, workEntry.createdAt) : null;
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    timeout: 1500,
+  });
 
   return (
     <div className="flex justify-start">
       <div
         className={cn(
-          "w-full max-w-[92%] overflow-hidden rounded-2xl border px-3.5 py-3 shadow-[0_8px_26px_-20px_--alpha(var(--color-black)/20%)]",
+          "app-terminal-run-card w-full max-w-[96%] overflow-hidden rounded-[24px] border px-4 py-3.5 shadow-[0_20px_56px_-36px_--alpha(var(--color-black)/28%)]",
           workEntry.tone === "error"
-            ? "border-rose-400/32 bg-rose-500/[0.08]"
-            : "border-border/70 bg-card/60",
+            ? "border-rose-400/32 bg-[linear-gradient(180deg,rgba(127,29,29,0.22),rgba(127,29,29,0.08))]"
+            : "border-border/70 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--card)_94%,transparent),color-mix(in_srgb,var(--background)_98%,transparent))]",
         )}
       >
-        <div className="flex items-start justify-between gap-2.5">
-          <div className="min-w-0 flex items-center gap-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex items-center gap-2.5">
             <span
               className={cn(
-                "flex size-7 shrink-0 items-center justify-center rounded-xl border",
+                "flex size-9 shrink-0 items-center justify-center rounded-2xl border shadow-[inset_0_1px_0_--alpha(var(--color-white)/8%)]",
                 workEntry.tone === "error"
                   ? "border-rose-300/40 bg-rose-500/15 text-rose-300"
-                  : "border-border/65 bg-background/72 text-foreground/85",
+                  : "border-border/65 bg-background/82 text-foreground/88",
               )}
             >
-              <TerminalIcon className="size-3.5" />
+              <TerminalIcon className="size-4" />
             </span>
-            <p className="truncate text-[12px] font-medium text-foreground/92" title={heading}>
-              {heading}
-            </p>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-border/55 bg-background/62 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground/72">
+                  Command
+                </span>
+                <p className="truncate text-[12px] font-medium text-foreground/94" title={heading}>
+                  {heading}
+                </p>
+              </div>
+              {workEntry.command ? (
+                <p
+                  className="mt-1 truncate font-mono text-[11px] text-muted-foreground/74"
+                  title={workEntry.command}
+                >
+                  {workEntry.command}
+                </p>
+              ) : null}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span
               className={cn(
-                "rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]",
-                statusLabel === "Live"
-                  ? "border-border/60 bg-background/80 text-foreground/82"
+                "rounded-full border px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.12em]",
+                statusLabel === "Running"
+                  ? "border-emerald-400/28 bg-emerald-500/[0.12] text-emerald-300"
                   : statusLabel === "Failed"
                     ? "border-rose-300/45 bg-rose-500/[0.14] text-rose-200"
                     : "border-border/55 bg-background/65 text-muted-foreground/78",
@@ -962,15 +1035,70 @@ const InlineCommandEntryRow = memo(function InlineCommandEntryRow(props: {
             >
               {statusLabel}
             </span>
-            <span className="text-[10px] text-muted-foreground/48">
-              {formatTimestamp(workEntry.createdAt, timestampFormat)}
-            </span>
+            <div className="text-right">
+              <div className="text-[10px] text-muted-foreground/48">
+                {formatTimestamp(startedAt, timestampFormat)}
+              </div>
+              {durationLabel && (
+                <div className="text-[10px] text-muted-foreground/38">{durationLabel}</div>
+              )}
+            </div>
           </div>
         </div>
-        {workEntry.command && (
-          <div className="mt-2 rounded-lg border border-border/65 bg-background/72 px-2.5 py-2">
+        {cwd && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground/62">
+            <span className="rounded-full border border-border/55 bg-background/60 px-2 py-0.5 uppercase tracking-[0.12em]">
+              cwd
+            </span>
             <code
-              className="block break-words font-mono text-[11px] leading-5 text-foreground/88"
+              className="truncate rounded-full border border-border/45 bg-background/50 px-2.5 py-0.5 font-mono text-[10px] text-foreground/72"
+              title={cwd}
+            >
+              {cwd}
+            </code>
+          </div>
+        )}
+        {workEntry.command && (
+          <div className="mt-3 rounded-[18px] border border-border/65 bg-background/74 px-3 py-3 shadow-[inset_0_1px_0_--alpha(var(--color-white)/5%)]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="rounded-full border border-border/55 bg-background/65 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground/72">
+                Shell input
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  className="h-7 rounded-full border-border/65 bg-background/78 px-3"
+                  onClick={() => onRerunCommand(workEntry.command!)}
+                >
+                  <PlayIcon className="size-3.5" />
+                  Rerun
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  className="h-7 rounded-full border-border/65 bg-background/78 px-3"
+                  onClick={() => onOpenCommandInTerminal(workEntry.command!)}
+                >
+                  <TerminalIcon className="size-3.5" />
+                  Open in terminal
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="h-7 rounded-full px-3"
+                  onClick={() => copyToClipboard(workEntry.command!, undefined)}
+                >
+                  <CopyIcon className="size-3.5" />
+                  {isCopied ? "Copied" : "Copy"}
+                </Button>
+              </div>
+            </div>
+            <code
+              className="mt-3 block break-words font-mono text-[11px] leading-5 text-foreground/88"
               title={workEntry.command}
             >
               {workEntry.command}
@@ -979,10 +1107,10 @@ const InlineCommandEntryRow = memo(function InlineCommandEntryRow(props: {
         )}
         {hasOutput && (
           <Collapsible open={isOutputExpanded} onOpenChange={onOutputExpandedChange}>
-            <div className="mt-2">
+            <div className="mt-3">
               <CollapsibleTrigger
                 type="button"
-                className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/55 px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 hover:text-foreground/80"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-3 py-1.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 hover:text-foreground/80"
               >
                 <ChevronRightIcon
                   className={cn(
@@ -993,11 +1121,21 @@ const InlineCommandEntryRow = memo(function InlineCommandEntryRow(props: {
                 <span>{isOutputExpanded ? "Hide output" : "Show output"}</span>
               </CollapsibleTrigger>
             </div>
-            <CollapsibleContent keepMounted className="mt-2">
-              <div className="max-h-72 overflow-auto rounded-lg border border-border/65 bg-background/80 px-2.5 py-2">
-                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground/88">
-                  {output}
-                </pre>
+            <CollapsibleContent keepMounted className="mt-2.5">
+              <div className="overflow-hidden rounded-[18px] border border-border/65 bg-background/82">
+                <div className="flex items-center justify-between gap-2 border-b border-border/55 px-3 py-2">
+                  <span className="rounded-full border border-border/55 bg-background/65 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground/72">
+                    Output
+                  </span>
+                  <span className="text-[10px] text-muted-foreground/55">
+                    {statusLabel === "Running" ? "Streaming" : "Captured"}
+                  </span>
+                </div>
+                <div className="max-h-72 overflow-auto px-3 py-2.5">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground/88">
+                    {output}
+                  </pre>
+                </div>
               </div>
             </CollapsibleContent>
           </Collapsible>

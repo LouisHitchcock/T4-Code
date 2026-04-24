@@ -988,6 +988,42 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.detail).not.toContain("powershell.exe");
   });
 
+  it("preserves cwd and exit code for tracked terminal command activities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tracked-terminal-command",
+        kind: "terminal.command.completed",
+        summary: "Command completed",
+        tone: "tool",
+        payload: {
+          runId: "run-terminal-1",
+          itemType: "command_execution",
+          detail: "hello from bang\n",
+          data: {
+            command: "echo hello from bang",
+            cwd: "/repo/project/src",
+            item: {
+              command: "echo hello from bang",
+              result: {
+                exitCode: 0,
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      command: "echo hello from bang",
+      cwd: "/repo/project/src",
+      exitCode: 0,
+      detail: "hello from bang",
+      itemType: "command_execution",
+      runId: "run-terminal-1",
+    });
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

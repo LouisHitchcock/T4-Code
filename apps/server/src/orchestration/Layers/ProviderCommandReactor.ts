@@ -1,6 +1,7 @@
 import {
   type ChatAttachment,
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   EventId,
   type OrchestrationEvent,
   type ProjectSkillName,
@@ -12,15 +13,17 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
+  type ServerProviderStatus,
   type TurnId,
 } from "@t3tools/contracts";
-import { isCodexOpenRouterModel } from "@t3tools/shared/model";
+import { isCodexOpenRouterModel, resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { Cache, Cause, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
+import { ProviderHealth } from "../../provider/Services/ProviderHealth.ts";
 import { takeTransientTurnStartProviderOptions } from "../../provider/transientProviderOptions.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -152,6 +155,61 @@ function mapProviderSessionStatusToOrchestrationStatus(
 function usesCodexOpenRouterRouting(model: string | undefined): boolean {
   return isCodexOpenRouterModel(model);
 }
+const PROVIDER_FALLBACK_PRIORITY: ReadonlyArray<ProviderKind> = [
+  "pi",
+  "codex",
+  "copilot",
+  "opencode",
+  "kimi",
+];
+
+function isProviderLaunchable(status: ServerProviderStatus): boolean {
+  return status.available && status.status !== "error";
+}
+
+function selectLaunchableProvider(input: {
+  readonly requestedProvider: ProviderKind | undefined;
+  readonly statuses: ReadonlyArray<ServerProviderStatus>;
+}): ProviderKind | undefined {
+  if (input.requestedProvider) {
+    const requestedStatus = input.statuses.find(
+      (status) => status.provider === input.requestedProvider,
+    );
+    if (requestedStatus && isProviderLaunchable(requestedStatus)) {
+      return input.requestedProvider;
+    }
+  }
+
+  const launchableStatuses = input.statuses.filter(isProviderLaunchable);
+  if (launchableStatuses.length === 0) {
+    return input.requestedProvider;
+  }
+
+  const statusScore = (value: ServerProviderStatus["status"]): number => {
+    if (value === "ready") return 2;
+    if (value === "warning") return 1;
+    return 0;
+  };
+  const authScore = (value: ServerProviderStatus["authStatus"]): number => {
+    if (value === "authenticated") return 2;
+    if (value === "unknown") return 1;
+    return 0;
+  };
+  const providerScore = (provider: ProviderKind): number => {
+    const index = PROVIDER_FALLBACK_PRIORITY.indexOf(provider);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+
+  return (
+    [...launchableStatuses].sort((left, right) => {
+      const byStatus = statusScore(right.status) - statusScore(left.status);
+      if (byStatus !== 0) return byStatus;
+      const byAuth = authScore(right.authStatus) - authScore(left.authStatus);
+      if (byAuth !== 0) return byAuth;
+      return providerScore(left.provider) - providerScore(right.provider);
+    })[0]?.provider ?? input.requestedProvider
+  );
+}
 
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
   event.commandId !== null ? `command:${event.commandId}` : `event:${event.eventId}`;
@@ -225,6 +283,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const providerHealth = yield* ProviderHealth;
   const git = yield* GitCore;
   const textGeneration = yield* TextGeneration;
   const handledTurnStartKeys = yield* Cache.make<string, true>({
@@ -357,8 +416,27 @@ const make = Effect.gen(function* () {
       thread.session?.providerName === "pi"
         ? thread.session.providerName
         : undefined;
-    const preferredProvider: ProviderKind | undefined = options?.provider ?? currentProvider;
-    const desiredModel = options?.model ?? thread.model;
+    const requestedProvider: ProviderKind | undefined = options?.provider ?? currentProvider;
+    const providerStatuses = yield* providerHealth.getStatuses.pipe(Effect.orElseSucceed(() => []));
+    const preferredProvider: ProviderKind | undefined = selectLaunchableProvider({
+      requestedProvider,
+      statuses: providerStatuses,
+    });
+    if (
+      requestedProvider !== undefined &&
+      preferredProvider !== undefined &&
+      requestedProvider !== preferredProvider
+    ) {
+      yield* Effect.logWarning("provider command reactor falling back to launchable provider", {
+        threadId,
+        requestedProvider,
+        selectedProvider: preferredProvider,
+      });
+    }
+    const desiredModel = resolveModelSlugForProvider(
+      preferredProvider ?? requestedProvider ?? "codex",
+      options?.model ?? thread.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+    );
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: readModel.projects,
@@ -418,17 +496,19 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const providerChanged =
-        options?.provider !== undefined && options.provider !== currentProvider;
+        preferredProvider !== undefined && preferredProvider !== currentProvider;
       const activeSession = yield* resolveActiveSession(existingSessionThreadId);
       const sessionModelSwitch =
         currentProvider === undefined
           ? "in-session"
           : (yield* providerService.getCapabilities(currentProvider)).sessionModelSwitch;
-      const modelChanged = options?.model !== undefined && options.model !== activeSession?.model;
+      const modelChanged =
+        desiredModel !== activeSession?.model &&
+        (options?.model !== undefined || providerChanged || activeSession?.model === undefined);
       const codexRoutingChanged =
         currentProvider === "codex" &&
         modelChanged &&
-        usesCodexOpenRouterRouting(options?.model) !==
+        usesCodexOpenRouterRouting(desiredModel) !==
           usesCodexOpenRouterRouting(activeSession?.model);
       const shouldRestartForModelChange =
         modelChanged && (sessionModelSwitch === "restart-session" || codexRoutingChanged);
@@ -448,7 +528,7 @@ const make = Effect.gen(function* () {
         threadId,
         existingSessionThreadId,
         currentProvider,
-        desiredProvider: options?.provider ?? currentProvider,
+        desiredProvider: preferredProvider ?? currentProvider,
         currentRuntimeMode: thread.session?.runtimeMode,
         desiredRuntimeMode: thread.runtimeMode,
         runtimeModeChanged,
@@ -460,7 +540,7 @@ const make = Effect.gen(function* () {
       });
       const restartedSession = yield* startProviderSession({
         ...(resumeCursor !== undefined ? { resumeCursor } : {}),
-        ...(options?.provider !== undefined ? { provider: options.provider } : {}),
+        ...(preferredProvider !== undefined ? { provider: preferredProvider } : {}),
       });
       yield* Effect.logInfo("provider command reactor restarted provider session", {
         threadId,
@@ -479,7 +559,7 @@ const make = Effect.gen(function* () {
     }
 
     const startedSession = yield* startProviderSession(
-      options?.provider !== undefined ? { provider: options.provider } : undefined,
+      preferredProvider !== undefined ? { provider: preferredProvider } : undefined,
     );
     yield* bindSessionToThread(startedSession);
     return {

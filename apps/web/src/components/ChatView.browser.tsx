@@ -2061,6 +2061,117 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("switches between Agent and Terminal mode from a bare ! prompt and exposes cwd picker", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-terminal-mode-toggle" as MessageId,
+        targetText: "terminal mode toggle target",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const modeIndicator = document.querySelector<HTMLElement>('[data-chat-composer-mode="true"]');
+          expect(modeIndicator).toBeTruthy();
+          expect(normalizeTextContent(modeIndicator?.textContent)).toContain("Agent mode");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "!");
+
+      await vi.waitFor(
+        () => {
+          const modeIndicator = document.querySelector<HTMLElement>('[data-chat-composer-mode="true"]');
+          expect(modeIndicator).toBeTruthy();
+          expect(normalizeTextContent(modeIndicator?.textContent)).toContain("Terminal mode");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const cwdButton = await waitForComposerControl("terminal-cwd");
+      await cwdButton.click();
+      await vi.waitFor(
+        () => {
+          expect(normalizeTextContent(document.body.textContent)).toContain("Terminal directory");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "");
+      await vi.waitFor(
+        () => {
+          const modeIndicator = document.querySelector<HTMLElement>('[data-chat-composer-mode="true"]');
+          expect(modeIndicator).toBeTruthy();
+          expect(normalizeTextContent(modeIndicator?.textContent)).toContain("Agent mode");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("uses ! cd to update cwd for subsequent standalone ! commands", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-bang-cd-command" as MessageId,
+        targetText: "bang cd command target",
+      }),
+    });
+
+    try {
+      const terminalOpenCountBefore = wsRequests.filter(
+        (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+      ).length;
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "! cd src");
+      const sendButton = await waitForComposerControl("primary-action");
+      await sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const cdSearchRequest = wsRequests.find(
+            (request) =>
+              request._tag === WS_METHODS.projectsSearchEntries &&
+              request.cwd === "/repo/project/src",
+          );
+          expect(cdSearchRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      expect(
+        wsRequests.filter(
+          (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+        ).length,
+      ).toBe(terminalOpenCountBefore);
+
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "!echo cwd check");
+      const secondSendButton = await waitForComposerControl("primary-action");
+      await secondSendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const terminalOpenRequests = wsRequests.filter(
+            (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
+          );
+          expect(terminalOpenRequests.length).toBeGreaterThan(terminalOpenCountBefore);
+          const latestTerminalOpen = terminalOpenRequests[terminalOpenRequests.length - 1] ?? null;
+          expect(latestTerminalOpen).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            threadId: THREAD_ID,
+            cwd: "/repo/project/src",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("runs standalone ! commands through hidden terminal opens instead of provider turns", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

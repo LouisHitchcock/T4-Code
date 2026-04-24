@@ -104,7 +104,15 @@ const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
-const BACKEND_READY_TIMEOUT_MS = 15_000;
+const BACKEND_MAX_OLD_SPACE_MB = 8_192;
+const backendReadyTimeoutOverride = Number.parseInt(
+  readBrandedEnv("BACKEND_READY_TIMEOUT_MS") ?? "",
+  10,
+);
+const BACKEND_READY_TIMEOUT_MS =
+  Number.isFinite(backendReadyTimeoutOverride) && backendReadyTimeoutOverride > 0
+    ? backendReadyTimeoutOverride
+    : 60_000;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
@@ -1198,8 +1206,13 @@ function configureAutoUpdater(): void {
   updatePollTimer.unref();
 }
 function backendEnv(): NodeJS.ProcessEnv {
+  const existingNodeOptions = process.env.NODE_OPTIONS?.trim() ?? "";
+  const backendNodeOptions = existingNodeOptions.includes("--max-old-space-size=")
+    ? existingNodeOptions
+    : `${existingNodeOptions}${existingNodeOptions.length > 0 ? " " : ""}--max-old-space-size=${BACKEND_MAX_OLD_SPACE_MB}`;
   return {
     ...process.env,
+    NODE_OPTIONS: backendNodeOptions,
     T4CODE_MODE: "desktop",
     T4CODE_NO_BROWSER: "1",
     T4CODE_PORT: "0",
@@ -1246,7 +1259,10 @@ async function startBackend(): Promise<void> {
       throw new Error(`Missing server entry at ${backendEntry}`);
     }
 
-    const child = ChildProcess.spawn(process.execPath, [backendEntry], {
+    const child = ChildProcess.spawn(
+      process.execPath,
+      [`--max-old-space-size=${BACKEND_MAX_OLD_SPACE_MB}`, backendEntry],
+      {
       cwd: resolveBackendCwd(),
       // In Electron main, process.execPath points to the Electron binary.
       // Run the child in Node mode so this backend process does not become a GUI app instance.
@@ -1255,7 +1271,8 @@ async function startBackend(): Promise<void> {
         ELECTRON_RUN_AS_NODE: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
-    });
+      },
+    );
     backendProcess = child;
 
     let backendSessionClosed = false;

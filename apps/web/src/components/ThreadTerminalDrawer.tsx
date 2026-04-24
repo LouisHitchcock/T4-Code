@@ -740,7 +740,7 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
+      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--card)_96%,transparent),color-mix(in_srgb,var(--background)_98%,transparent))] shadow-[0_-24px_64px_-48px_--alpha(var(--color-black)/30%)] backdrop-blur-xl"
       style={{ height: `${drawerHeight}px` }}
     >
       <div
@@ -754,38 +754,59 @@ export default function ThreadTerminalDrawer({
         onPointerCancel={handleResizePointerEnd}
       />
 
-      {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
-          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
-            <TerminalActionButton
-              className={`p-1 text-foreground/90 transition-colors ${
-                hasReachedSplitLimit ? "opacity-45" : "hover:bg-accent"
-              }`}
-              onClick={onSplitTerminalAction}
-              label={splitTerminalActionLabel}
-              disabled={hasReachedSplitLimit}
-            >
-              <SquareSplitHorizontal className="size-3.25" />
-            </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
-            <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={onNewTerminalAction}
-              label={newTerminalActionLabel}
-            >
-              <Plus className="size-3.25" />
-            </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
-            <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
-              label={closeTerminalActionLabel}
-            >
-              <Trash2 className="size-3.25" />
-            </TerminalActionButton>
+      <div className="border-b border-border/55 px-3 py-2.5 sm:px-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/72">
+                Terminal dock
+              </span>
+              <span className="text-sm font-medium text-foreground/92">
+                {normalizedTerminalIds.length} terminal
+                {normalizedTerminalIds.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground/70">
+              <span className="rounded-full border border-border/50 bg-background/55 px-2 py-0.5 uppercase tracking-[0.12em]">
+                cwd
+              </span>
+              <code className="truncate font-mono text-[11px] text-foreground/74" title={cwd}>
+                {cwd}
+              </code>
+            </div>
           </div>
+          {!hasTerminalSidebar && (
+            <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-full border border-border/80 bg-background/70 shadow-[0_12px_32px_-24px_--alpha(var(--color-black)/24%)]">
+              <TerminalActionButton
+                className={`p-1.5 text-foreground/90 transition-colors ${
+                  hasReachedSplitLimit ? "opacity-45" : "hover:bg-accent"
+                }`}
+                onClick={onSplitTerminalAction}
+                label={splitTerminalActionLabel}
+                disabled={hasReachedSplitLimit}
+              >
+                <SquareSplitHorizontal className="size-3.25" />
+              </TerminalActionButton>
+              <div className="h-4 w-px bg-border/80" />
+              <TerminalActionButton
+                className="p-1.5 text-foreground/90 transition-colors hover:bg-accent"
+                onClick={onNewTerminalAction}
+                label={newTerminalActionLabel}
+              >
+                <Plus className="size-3.25" />
+              </TerminalActionButton>
+              <div className="h-4 w-px bg-border/80" />
+              <TerminalActionButton
+                className="p-1.5 text-foreground/90 transition-colors hover:bg-accent"
+                onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+                label={closeTerminalActionLabel}
+              >
+                <Trash2 className="size-3.25" />
+              </TerminalActionButton>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       <div className="min-h-0 w-full flex-1">
         <div className={`flex h-full min-h-0 ${hasTerminalSidebar ? "gap-1.5" : ""}`}>

@@ -1,5 +1,10 @@
 import { ThreadId } from "@t3tools/contracts";
-import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  redirect,
+  retainSearchParams,
+  useNavigate,
+} from "@tanstack/react-router";
 import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import ChatView from "../components/ChatView";
@@ -247,6 +252,9 @@ function ChatThreadRouteView() {
 }
 
 export const Route = createFileRoute("/_chat/$threadId")({
+  beforeLoad: () => {
+    throw redirect({ to: "/draft" });
+  },
   validateSearch: (search) => parseDiffRouteSearch(search),
   search: {
     middlewares: [retainSearchParams<DiffRouteSearch>(["diff"])],

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  commandLifecycleDisplayLabel,
   computeMessageDurationStart,
+  deriveActionStepStatus,
+  deriveActionStepType,
+  deriveCommandLifecycleState,
   deriveTimelineWorkEntryVisualState,
   formatWorkingTimer,
   isCommandWorkEntry,
@@ -258,6 +262,70 @@ describe("isCommandWorkEntry", () => {
     ).toBe(false);
   });
 });
+describe("deriveCommandLifecycleState", () => {
+  it("returns failed when command exit code is non-zero", () => {
+    expect(
+      deriveCommandLifecycleState({
+        tone: "tool",
+        label: "Command completed",
+        exitCode: 2,
+      }),
+    ).toBe("failed");
+  });
+
+  it("detects running command activity from lifecycle event kind", () => {
+    expect(
+      deriveCommandLifecycleState({
+        tone: "tool",
+        label: "Running command",
+        activityKind: "terminal.command.started",
+      }),
+    ).toBe("running");
+  });
+
+  it("maps completed lifecycle state to done label", () => {
+    expect(commandLifecycleDisplayLabel("completed")).toBe("Done");
+  });
+});
+
+describe("deriveActionStepType", () => {
+  it("classifies file-read requests as read action steps", () => {
+    expect(
+      deriveActionStepType({
+        requestKind: "file-read",
+      }),
+    ).toBe("read");
+  });
+
+  it("classifies command execution items as command steps", () => {
+    expect(
+      deriveActionStepType({
+        itemType: "command_execution",
+      }),
+    ).toBe("command");
+  });
+});
+
+describe("deriveActionStepStatus", () => {
+  it("returns running while command work is still streaming", () => {
+    expect(
+      deriveActionStepStatus({
+        tone: "tool",
+        label: "Running command",
+        activityKind: "command.output.streaming",
+      }),
+    ).toBe("running");
+  });
+
+  it("returns done for completed non-error steps", () => {
+    expect(
+      deriveActionStepStatus({
+        tone: "tool",
+        label: "Read file completed",
+      }),
+    ).toBe("done");
+  });
+});
 describe("shouldAnimateAssistantResponseAfterTool", () => {
   it("animates assistant responses that follow work rows", () => {
     expect(
@@ -272,7 +340,7 @@ describe("shouldAnimateAssistantResponseAfterTool", () => {
     expect(
       shouldAnimateAssistantResponseAfterTool({
         messageRole: "assistant",
-        previousRowKind: "command-work",
+        previousRowKind: "command-run",
       }),
     ).toBe(true);
   });

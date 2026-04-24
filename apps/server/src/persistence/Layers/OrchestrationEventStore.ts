@@ -62,7 +62,7 @@ const ReadFromSequenceRequestSchema = Schema.Struct({
   limit: Schema.Number,
 });
 const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000;
-const READ_PAGE_SIZE = 500;
+const READ_PAGE_SIZE = 100;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -264,7 +264,7 @@ const makeEventStore = Effect.gen(function* () {
       cursor: number,
       remaining: number,
     ): Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError> =>
-      Stream.fromEffect(
+      Stream.unwrap(
         readEventRowsFromSequence({
           sequenceExclusive: cursor,
           limit: Math.min(remaining, READ_PAGE_SIZE),
@@ -275,30 +275,27 @@ const makeEventStore = Effect.gen(function* () {
               "OrchestrationEventStore.readFromSequence:decodeRows",
             ),
           ),
-          Effect.flatMap((rows) =>
-            Effect.forEach(rows, (row) =>
-              decodeEvent(sanitizePersistedEventRow(row)).pipe(
-                Effect.mapError(
-                  toPersistenceDecodeError("OrchestrationEventStore.readFromSequence:rowToEvent"),
+          Effect.map((rows) => {
+            if (rows.length === 0) {
+              return Stream.empty as Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+            }
+            const decodedPage = Stream.fromIterable(rows).pipe(
+              Stream.mapEffect((row) =>
+                decodeEvent(sanitizePersistedEventRow(row)).pipe(
+                  Effect.mapError(
+                    toPersistenceDecodeError("OrchestrationEventStore.readFromSequence:rowToEvent"),
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+            const nextRemaining = remaining - rows.length;
+            if (nextRemaining <= 0) {
+              return decodedPage;
+            }
+            const nextCursor = rows[rows.length - 1]!.sequence;
+            return Stream.concat(decodedPage, readPage(nextCursor, nextRemaining));
+          }),
         ),
-      ).pipe(
-        Stream.flatMap((events) => {
-          if (events.length === 0) {
-            return Stream.empty;
-          }
-          const nextRemaining = remaining - events.length;
-          if (nextRemaining <= 0) {
-            return Stream.fromIterable(events);
-          }
-          return Stream.concat(
-            Stream.fromIterable(events),
-            readPage(events[events.length - 1]!.sequence, nextRemaining),
-          );
-        }),
       );
 
     return readPage(sequenceExclusive, normalizedLimit);

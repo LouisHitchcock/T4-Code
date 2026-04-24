@@ -47,6 +47,9 @@ function syncBrandedEnv(primaryKey: string, legacyKey: string): void {
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3", "dev"),
 );
+export const DEFAULT_DESKTOP_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
+  path.join(homedir(), ".t3", "dev-desktop"),
+);
 
 const MODE_ARGS = {
   dev: [
@@ -142,7 +145,10 @@ export function resolveOffset(config: {
   return { offset, source: `hashed T4CODE_DEV_INSTANCE=${seed}` };
 }
 
-function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, never, Path.Path> {
+function resolveStateDir(
+  stateDir: string | undefined,
+  mode: DevMode,
+): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const configured = stateDir?.trim();
@@ -151,7 +157,11 @@ function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, ne
       // Resolve relative paths against cwd (monorepo root) before turbo changes directories.
       return path.resolve(configured);
     }
+    if (mode === "dev:desktop") {
+      return yield* DEFAULT_DESKTOP_DEV_STATE_DIR;
+    }
 
+    return yield* DEFAULT_DEV_STATE_DIR;
     return yield* DEFAULT_DEV_STATE_DIR;
   });
 }
@@ -586,7 +596,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       logWebSocketEvents: readOptionalBooleanEnv("T4CODE_LOG_WS_EVENTS"),
     };
 
-    const resolvedStateDir = yield* resolveStateDir(input.stateDir);
+    const resolvedStateDir = yield* resolveStateDir(input.stateDir, input.mode);
     const selectionPath =
       input.port === undefined && input.devUrl === undefined
         ? getDevRunnerSelectionPath(resolvedStateDir)

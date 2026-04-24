@@ -1,7 +1,11 @@
 import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStateStore";
+import {
+  selectThreadTerminalControlState,
+  selectThreadTerminalState,
+  useTerminalStateStore,
+} from "./terminalStateStore";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
 
@@ -10,7 +14,10 @@ describe("terminalStateStore actions", () => {
     if (typeof localStorage !== "undefined") {
       localStorage.clear();
     }
-    useTerminalStateStore.setState({ terminalStateByThreadId: {} });
+    useTerminalStateStore.setState({
+      terminalStateByThreadId: {},
+      terminalControlStateByThreadId: {},
+    });
   });
 
   it("returns a closed default terminal state for unknown threads", () => {
@@ -153,5 +160,31 @@ describe("terminalStateStore actions", () => {
     expect(terminalState.terminalGroups).toEqual([
       { id: "group-default", terminalIds: ["default", "terminal-2"] },
     ]);
+  });
+
+  it("tracks control mode transitions and resets on clear", () => {
+    const store = useTerminalStateStore.getState();
+    expect(
+      selectThreadTerminalControlState(
+        useTerminalStateStore.getState().terminalControlStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toBe("agent-attached");
+
+    store.setTerminalControlState(THREAD_ID, "user-takeover");
+    expect(
+      selectThreadTerminalControlState(
+        useTerminalStateStore.getState().terminalControlStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toBe("user-takeover");
+
+    store.clearTerminalState(THREAD_ID);
+    expect(
+      selectThreadTerminalControlState(
+        useTerminalStateStore.getState().terminalControlStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toBe("agent-attached");
   });
 });

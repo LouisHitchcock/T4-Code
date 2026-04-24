@@ -79,8 +79,11 @@ export interface WorkLogEntry {
   turnId?: TurnId;
   createdAt: string;
   label: string;
+  runId?: string;
   detail?: string;
   command?: string;
+  cwd?: string;
+  exitCode?: number | null;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -926,6 +929,7 @@ export function deriveWorkLogEntries(
       const itemType = extractWorkLogItemType(payload);
       const requestKind = extractWorkLogRequestKind(payload);
       const itemId = extractWorkLogItemId(payload);
+      const runId = extractWorkLogRunId(payload);
       const entry: WorkLogEntry = {
         id: activity.id,
         ...(activity.turnId ? { turnId: activity.turnId } : {}),
@@ -934,6 +938,9 @@ export function deriveWorkLogEntries(
         tone: activity.tone === "approval" ? "info" : activity.tone,
         activityKind: activity.kind,
       };
+      if (runId) {
+        entry.runId = runId;
+      }
       if (alwaysVisible) {
         entry.alwaysVisible = true;
       }
@@ -947,6 +954,14 @@ export function deriveWorkLogEntries(
       }
       if (command) {
         entry.command = command;
+      }
+      const cwd = extractWorkLogCwd(payload);
+      if (cwd) {
+        entry.cwd = cwd;
+      }
+      const exitCode = extractCommandExitCode(payload);
+      if (exitCode !== undefined) {
+        entry.exitCode = exitCode;
       }
       if (changedFiles.length > 0) {
         entry.changedFiles = changedFiles;
@@ -1016,6 +1031,22 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(payload?.title);
+}
+
+function extractWorkLogRunId(payload: Record<string, unknown> | null): string | null {
+  return asTrimmedString(payload?.runId);
+}
+
+function extractWorkLogCwd(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const input = asRecord(item?.input);
+  return (
+    asTrimmedString(data?.cwd) ??
+    asTrimmedString(item?.cwd) ??
+    asTrimmedString(input?.cwd) ??
+    null
+  );
 }
 
 function flattenTextValue(value: unknown, depth = 0): string | null {
@@ -1094,6 +1125,25 @@ function extractWorkLogDetail(input: {
     return null;
   }
   return detail;
+}
+
+function extractCommandExitCode(
+  payload: Record<string, unknown> | null,
+): number | null | undefined {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const result = asRecord(item?.result);
+  if (typeof result?.exitCode === "number" && Number.isFinite(result.exitCode)) {
+    return result.exitCode;
+  }
+
+  const parsedFromDetail =
+    typeof payload?.detail === "string" ? stripTrailingExitCode(payload.detail).exitCode : undefined;
+  if (parsedFromDetail !== undefined) {
+    return parsedFromDetail;
+  }
+
+  return undefined;
 }
 
 function stripTrailingExitCode(value: string): {

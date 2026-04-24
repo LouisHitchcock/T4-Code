@@ -38,44 +38,44 @@ describe("isForkPrereleaseVersion", () => {
 });
 
 describe("resolveAppReleaseBranding", () => {
-  it("keeps local dev-server sessions on unified T4Code branding", () => {
+  it("keeps local dev-server sessions on unified Draft branding", () => {
     expect(resolveAppReleaseBranding({ version: "1.2.3", isDevelopment: true })).toEqual({
-      stageLabel: "T4Code",
-      displayName: "T4Code",
-      productName: "T4Code",
+      stageLabel: "Draft",
+      displayName: "Draft",
+      productName: "Draft",
       appId: "com.t3tools.t4code",
       stateDirName: "t4code",
       userDataDirName: "t4code",
     });
   });
 
-  it("keeps prerelease packages on unified T4Code branding", () => {
+  it("keeps prerelease packages on unified Draft branding", () => {
     expect(resolveAppReleaseBranding({ version: "0.0.11-alpha.3", isDevelopment: false })).toEqual({
-      stageLabel: "T4Code",
-      displayName: "T4Code",
-      productName: "T4Code",
+      stageLabel: "Draft",
+      displayName: "Draft",
+      productName: "Draft",
       appId: "com.t3tools.t4code",
       stateDirName: "t4code",
       userDataDirName: "t4code",
     });
   });
 
-  it("keeps fork prerelease packages on unified T4Code branding", () => {
+  it("keeps fork prerelease packages on unified Draft branding", () => {
     expect(resolveAppReleaseBranding({ version: "0.0.11-fork.3", isDevelopment: false })).toEqual({
-      stageLabel: "T4Code",
-      displayName: "T4Code",
-      productName: "T4Code",
+      stageLabel: "Draft",
+      displayName: "Draft",
+      productName: "Draft",
       appId: "com.t3tools.t4code",
       stateDirName: "t4code",
       userDataDirName: "t4code",
     });
   });
 
-  it("keeps stable packaged builds on unified T4Code branding", () => {
+  it("keeps stable packaged builds on unified Draft branding", () => {
     expect(resolveAppReleaseBranding({ version: "1.2.3", isDevelopment: false })).toEqual({
-      stageLabel: "T4Code",
-      displayName: "T4Code",
-      productName: "T4Code",
+      stageLabel: "Draft",
+      displayName: "Draft",
+      productName: "Draft",
       appId: "com.t3tools.t4code",
       stateDirName: "t4code",
       userDataDirName: "t4code",

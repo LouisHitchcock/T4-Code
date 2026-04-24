@@ -102,6 +102,13 @@ import { type SidebarArchiveFilterMode } from "../lib/threadOrdering";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 10;
+type SidebarThreadSelectionHandler = (threadId: ThreadId) => void;
+type SidebarNewThreadHandler = (projectId: ProjectId) => Promise<void> | void;
+
+interface SidebarProps {
+  onSelectThread?: SidebarThreadSelectionHandler;
+  onCreateThreadInProject?: SidebarNewThreadHandler;
+}
 
 function getSidebarCopy(language: AppLanguage) {
   if (language === "fa") {
@@ -406,7 +413,7 @@ function localizeThreadStatusLabel(label: string, language: AppLanguage): string
 }
 
 function BrandMark() {
-  return <img src="/icon.png" alt="" className="size-5 shrink-0 rounded-md" />;
+  return <img src="/t4.png" alt="" className="size-5 shrink-0 rounded-md" />;
 }
 
 function ProjectFavicon({ cwd }: { cwd: string }) {
@@ -458,7 +465,8 @@ function SortableProjectItem({
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar(props: SidebarProps = {}) {
+  const { onCreateThreadInProject, onSelectThread } = props;
   const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
@@ -582,12 +590,29 @@ export default function Sidebar() {
       if (isMobile) {
         setOpenMobile(false);
       }
+      if (onSelectThread) {
+        onSelectThread(threadId);
+        return;
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId },
       });
     },
-    [isMobile, navigate, setOpenMobile],
+    [isMobile, navigate, onSelectThread, setOpenMobile],
+  );
+  const createThreadInProject = useCallback(
+    (projectId: ProjectId) => {
+      if (onCreateThreadInProject) {
+        return Promise.resolve(onCreateThreadInProject(projectId));
+      }
+      return openNewThread(projectId, {
+        envMode: resolveSidebarNewThreadEnvMode({
+          defaultEnvMode: appSettings.defaultThreadEnvMode,
+        }),
+      });
+    },
+    [appSettings.defaultThreadEnvMode, onCreateThreadInProject, openNewThread],
   );
   const threadGitTargets = useMemo(
     () =>
@@ -1743,11 +1768,7 @@ export default function Sidebar() {
                                     onClick={(event) => {
                                       event.preventDefault();
                                       event.stopPropagation();
-                                      void openNewThread(project.id, {
-                                        envMode: resolveSidebarNewThreadEnvMode({
-                                          defaultEnvMode: appSettings.defaultThreadEnvMode,
-                                        }),
-                                      });
+                                      void createThreadInProject(project.id);
                                     }}
                                   >
                                     <SquarePenIcon className="size-3.5" />

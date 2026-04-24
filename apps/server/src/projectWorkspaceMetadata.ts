@@ -132,7 +132,7 @@ function buildInitManagedSection(cwd: string): string {
 
   const lines: string[] = [
     INIT_SECTION_START,
-    "## T4Code Init Snapshot",
+    "## Draft Init Snapshot",
     "",
     `- Workspace root: ${path.basename(cwd)}`,
   ];

@@ -5,6 +5,93 @@ export interface TimelineDurationMessage {
   completedAt?: string | undefined;
 }
 
+export type CommandLifecycleState = "queued" | "running" | "completed" | "failed";
+
+export interface TimelineCommandLifecycleInput {
+  tone: TimelineWorkTone;
+  label: string;
+  activityKind?: string | undefined;
+  exitCode?: number | null | undefined;
+}
+
+export function deriveCommandLifecycleState(
+  input: TimelineCommandLifecycleInput,
+): CommandLifecycleState {
+  if (typeof input.exitCode === "number") {
+    return input.exitCode === 0 ? "completed" : "failed";
+  }
+  if (input.tone === "error") {
+    return "failed";
+  }
+  const normalizedLabel = input.label.trim().toLowerCase();
+  const normalizedActivityKind = input.activityKind?.trim().toLowerCase();
+  if (
+    normalizedLabel === "running command" ||
+    normalizedActivityKind === "terminal.command.started" ||
+    normalizedActivityKind === "command.output.streaming"
+  ) {
+    return "running";
+  }
+  if (
+    normalizedLabel === "command queued" ||
+    normalizedActivityKind === "terminal.command.queued"
+  ) {
+    return "queued";
+  }
+  if (normalizedLabel === "command failed") {
+    return "failed";
+  }
+  return "completed";
+}
+
+export function commandLifecycleDisplayLabel(state: CommandLifecycleState): string {
+  switch (state) {
+    case "running":
+      return "Running";
+    case "queued":
+      return "Queued";
+    case "failed":
+      return "Failed";
+    default:
+      return "Done";
+  }
+}
+
+export type TimelineActionStepStatus = "running" | "done" | "failed";
+export type TimelineActionStepType = "read" | "search" | "edit" | "command" | "tool";
+
+export function deriveActionStepStatus(
+  input: Pick<TimelineCommandLifecycleInput, "activityKind" | "exitCode" | "label" | "tone">,
+): TimelineActionStepStatus {
+  const lifecycleState = deriveCommandLifecycleState(input);
+  if (lifecycleState === "failed") {
+    return "failed";
+  }
+  if (lifecycleState === "running" || lifecycleState === "queued") {
+    return "running";
+  }
+  return "done";
+}
+
+export function deriveActionStepType(input: {
+  itemType?: string | undefined;
+  requestKind?: string | undefined;
+}): TimelineActionStepType {
+  if (input.requestKind === "file-read") {
+    return "read";
+  }
+  if (input.itemType === "web_search") {
+    return "search";
+  }
+  if (input.itemType === "file_change") {
+    return "edit";
+  }
+  if (input.itemType === "command_execution" || input.requestKind === "command") {
+    return "command";
+  }
+  return "tool";
+}
+
 export function isCommandWorkEntry(input: {
   itemType?: string | undefined;
   requestKind?: string | undefined;
@@ -22,7 +109,7 @@ export type TimelineWorkEntryVisualState = "active" | "recent" | "settled" | "er
 export type TimelineRowKindForAnimation =
   | "message"
   | "work"
-  | "command-work"
+  | "command-run"
   | "proposed-plan"
   | "working"
   | null;
@@ -98,6 +185,6 @@ export function shouldAnimateAssistantResponseAfterTool(input: {
 }): boolean {
   return (
     input.messageRole === "assistant" &&
-    (input.previousRowKind === "work" || input.previousRowKind === "command-work")
+    (input.previousRowKind === "work" || input.previousRowKind === "command-run")
   );
 }

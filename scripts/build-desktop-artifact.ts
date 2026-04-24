@@ -481,10 +481,10 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 ) {
   const artifactName =
     platform === "mac"
-      ? "T4Code-macOS-${version}-${arch}.${ext}"
+      ? "Draft-macOS-${version}-${arch}.${ext}"
       : platform === "linux"
-        ? "T4Code-linux-${version}-${arch}.${ext}"
-        : "T4Code-windows-${version}-${arch}.${ext}";
+        ? "Draft-linux-${version}-${arch}.${ext}"
+        : "Draft-windows-${version}-${arch}.${ext}";
   const buildConfig: Record<string, unknown> = {
     appId,
     productName,
@@ -677,7 +677,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     buildVersion: appVersion,
     cut3CommitHash: commitHash,
     private: true,
-    description: "T4Code desktop build",
+    description: "Draft desktop build",
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
@@ -826,7 +826,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T4Code."),
+  Command.withDescription("Build a desktop artifact for Draft."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

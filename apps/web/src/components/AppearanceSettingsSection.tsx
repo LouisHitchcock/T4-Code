@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CopyIcon,
   DownloadIcon,
@@ -299,6 +299,12 @@ export function AppearanceSettingsSection() {
 
   const appearanceSettingsKey =
     editedAppearance === "dark" ? "darkAppearanceTheme" : "lightAppearanceTheme";
+  const latestDraftStateRef = useRef({
+    colorDrafts,
+    uiFontSizeDraft,
+    activeThemeConfig,
+    appearanceSettingsKey,
+  });
   const presetColorsOverrideBase = customThemeEnabled;
   const previewRightLabel = presetColorsOverrideBase ? copy.savedBaseTheme : copy.currentLabel;
 
@@ -310,6 +316,70 @@ export function AppearanceSettingsSection() {
       },
     });
   };
+
+  useEffect(() => {
+    latestDraftStateRef.current = {
+      colorDrafts,
+      uiFontSizeDraft,
+      activeThemeConfig,
+      appearanceSettingsKey,
+    };
+  }, [activeThemeConfig, appearanceSettingsKey, colorDrafts, uiFontSizeDraft]);
+
+  useEffect(() => {
+    return () => {
+      const latest = latestDraftStateRef.current;
+      const normalizedAccent = normalizeHexColor(
+        latest.colorDrafts.accent,
+        latest.activeThemeConfig.accent,
+      );
+      const normalizedBackground = normalizeHexColor(
+        latest.colorDrafts.background,
+        latest.activeThemeConfig.background,
+      );
+      const normalizedForeground = normalizeHexColor(
+        latest.colorDrafts.foreground,
+        latest.activeThemeConfig.foreground,
+      );
+      const themePatch: {
+        accent?: string;
+        background?: string;
+        foreground?: string;
+      } = {};
+      if (normalizedAccent !== latest.activeThemeConfig.accent) {
+        themePatch.accent = normalizedAccent;
+      }
+      if (normalizedBackground !== latest.activeThemeConfig.background) {
+        themePatch.background = normalizedBackground;
+      }
+      if (normalizedForeground !== latest.activeThemeConfig.foreground) {
+        themePatch.foreground = normalizedForeground;
+      }
+
+      const fontDraft = latest.uiFontSizeDraft.trim();
+      const parsedFontDraft = Number(fontDraft);
+      const nextFontSize =
+        fontDraft.length > 0 && Number.isFinite(parsedFontDraft)
+          ? clampUiFontSizePx(parsedFontDraft, settings.uiFontSizePx)
+          : settings.uiFontSizePx;
+
+      if (Object.keys(themePatch).length === 0 && nextFontSize === settings.uiFontSizePx) {
+        return;
+      }
+
+      updateSettings({
+        ...(Object.keys(themePatch).length > 0
+          ? {
+              [latest.appearanceSettingsKey]: {
+                ...latest.activeThemeConfig,
+                ...themePatch,
+              },
+            }
+          : {}),
+        ...(nextFontSize !== settings.uiFontSizePx ? { uiFontSizePx: nextFontSize } : {}),
+      });
+    };
+  }, [settings.uiFontSizePx, updateSettings]);
 
   const previewSurfaceLabel = activeThemeConfig.translucentSidebar ? "sidebar-elevated" : "sidebar";
   const defaultSurfaceLabel = activeThemeDefaults.translucentSidebar

@@ -8,6 +8,7 @@ import {
   ApprovalRequestId,
   type OrchestrationEvent,
   type OrchestrationThread,
+  type ServerProviderStatus,
 } from "@t3tools/contracts";
 import {
   Effect,
@@ -38,6 +39,7 @@ import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
+import { ProviderHealth } from "../src/provider/Services/ProviderHealth.ts";
 import { makeCodexAdapterLive } from "../src/provider/Layers/CodexAdapter.ts";
 import { CodexAdapter } from "../src/provider/Services/CodexAdapter.ts";
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
@@ -296,10 +298,22 @@ export const makeOrchestrationIntegrationHarness = (
     const textGenerationLayer = Layer.succeed(TextGeneration, {
       generateBranchName: () => Effect.succeed({ branch: null }),
     } as unknown as TextGenerationShape);
+    const providerHealthLayer = Layer.succeed(ProviderHealth, {
+      getStatuses: Effect.succeed([
+        {
+          provider,
+          status: "ready",
+          available: true,
+          authStatus: "authenticated",
+          checkedAt: new Date().toISOString(),
+        },
+      ] satisfies ReadonlyArray<ServerProviderStatus>),
+    });
     const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(gitCoreLayer),
       Layer.provideMerge(textGenerationLayer),
+      Layer.provideMerge(providerHealthLayer),
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),

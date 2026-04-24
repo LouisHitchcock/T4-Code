@@ -2263,6 +2263,7 @@ describe("WebSocket Server", () => {
       summary: "Running command",
       payload: {
         itemType: "command_execution",
+        runId: expect.any(String),
         data: {
           item: {
             command: "echo hello from bang",
@@ -2308,6 +2309,7 @@ describe("WebSocket Server", () => {
       kind: "terminal.command.completed",
       summary: "Command completed",
       payload: {
+        runId: expect.any(String),
         detail: "hello from bang\n",
       },
     });
