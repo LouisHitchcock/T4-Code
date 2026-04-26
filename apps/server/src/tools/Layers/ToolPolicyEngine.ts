@@ -13,6 +13,45 @@ function normalizePolicyDefaultAction(raw: string | undefined): ToolPolicyDecisi
   }
   return "allow";
 }
+function readInvocationInput(
+  invocation: ReturnType<typeof decodeToolInvocation>,
+): Record<string, unknown> | null {
+  if (!invocation.input || typeof invocation.input !== "object" || Array.isArray(invocation.input)) {
+    return null;
+  }
+  return invocation.input as Record<string, unknown>;
+}
+
+function readCliArgs(invocation: ReturnType<typeof decodeToolInvocation>): string[] {
+  const input = readInvocationInput(invocation);
+  if (!input) return [];
+  const rawArgs = input.args;
+  if (!Array.isArray(rawArgs)) return [];
+  return rawArgs.filter((value): value is string => typeof value === "string");
+}
+
+function hasReadOnlyOverride(invocation: ReturnType<typeof decodeToolInvocation>): boolean {
+  const input = readInvocationInput(invocation);
+  return input?.readOnly === true;
+}
+
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  "status",
+  "log",
+  "show",
+  "diff",
+  "rev-parse",
+  "remote",
+  "config",
+  "ls-files",
+  "grep",
+  "describe",
+  "blame",
+  "cat-file",
+  "shortlog",
+  "help",
+  "version",
+]);
 
 function isRiskyTool(invocation: ReturnType<typeof decodeToolInvocation>): boolean {
   if (invocation.toolName === "apply_patch") {
@@ -24,6 +63,20 @@ function isRiskyTool(invocation: ReturnType<typeof decodeToolInvocation>): boole
     }
     const value = invocation.input as { isRisky?: unknown };
     return value.isRisky === true;
+  }
+  if (invocation.toolName === "cli.gh") {
+    return !hasReadOnlyOverride(invocation);
+  }
+  if (invocation.toolName === "cli.git") {
+    if (hasReadOnlyOverride(invocation)) {
+      return false;
+    }
+    const args = readCliArgs(invocation);
+    const subcommand = args[0]?.trim().toLowerCase();
+    if (!subcommand) {
+      return true;
+    }
+    return !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand);
   }
   return false;
 }

@@ -3,6 +3,13 @@ import { NonNegativeInt, ThreadId, TrimmedNonEmptyString, TurnId } from "./baseS
 
 export const ToolName = Schema.Literals([
   "terminal.exec",
+  "cli.capabilities",
+  "cli.rg",
+  "cli.fd",
+  "cli.jq",
+  "cli.yq",
+  "cli.git",
+  "cli.gh",
   "grep",
   "file_glob",
   "semantic_search",

@@ -355,6 +355,73 @@ describe("wsNativeApi", () => {
     );
   });
 
+  it("forwards tools requests and tools events through websocket transport", async () => {
+    requestMock.mockResolvedValue({
+      runId: "run-1",
+      threadId: "thread-1",
+      status: "succeeded",
+      startedAt: "2026-02-24T00:00:00.000Z",
+      completedAt: "2026-02-24T00:00:01.000Z",
+      results: [],
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.tools.execute({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      executionMode: "auto",
+      invocations: [
+        {
+          toolCallId: "call-1",
+          toolName: "grep",
+          input: { query: "needle" },
+        },
+      ],
+    });
+    await api.tools.getResult({
+      runId: "run-1",
+    });
+
+    expect(requestMock).toHaveBeenNthCalledWith(
+      1,
+      WS_METHODS.toolsExecute,
+      {
+        threadId: "thread-1",
+        executionMode: "auto",
+        invocations: [
+          {
+            toolCallId: "call-1",
+            toolName: "grep",
+            input: { query: "needle" },
+          },
+        ],
+      },
+      expect.objectContaining({ resultSchema: expect.anything() }),
+    );
+    expect(requestMock).toHaveBeenNthCalledWith(
+      2,
+      WS_METHODS.toolsGetResult,
+      {
+        runId: "run-1",
+      },
+      expect.objectContaining({ resultSchema: expect.anything() }),
+    );
+
+    const onToolEvent = vi.fn();
+    api.tools.onEvent(onToolEvent);
+    const event = {
+      type: "tool.started",
+      runId: "run-1",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      toolCallId: "call-1",
+      toolName: "grep",
+      createdAt: "2026-02-24T00:00:00.000Z",
+    } as const;
+    emitPush(WS_CHANNELS.toolsEvent, event);
+    expect(onToolEvent).toHaveBeenCalledTimes(1);
+    expect(onToolEvent).toHaveBeenCalledWith(event);
+  });
+
   it("forwards workspace file writes to the websocket project method", async () => {
     requestMock.mockResolvedValue({ relativePath: "plan.md" });
     const { createWsNativeApi } = await import("./wsNativeApi");

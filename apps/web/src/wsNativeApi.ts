@@ -30,6 +30,7 @@ import {
   ServerUpsertKeybindingResult,
   TerminalExecResult,
   TerminalSessionSnapshot,
+  ToolsExecuteResult,
   ThreadCompactResult,
   ThreadCreateShareResult,
   ThreadGetShareResult,
@@ -183,6 +184,13 @@ export function createWsNativeApi(): NativeApi {
         transport.subscribe(WS_CHANNELS.terminalEvent, (message) => callback(message.data)),
       onExecEvent: (callback) =>
         transport.subscribe(WS_CHANNELS.terminalExecEvent, (message) => callback(message.data)),
+    },
+    tools: {
+      execute: (input) => requestWithSchema(WS_METHODS.toolsExecute, ToolsExecuteResult, input),
+      getResult: (input) =>
+        requestWithSchema(WS_METHODS.toolsGetResult, ToolsExecuteResult, input),
+      onEvent: (callback) =>
+        transport.subscribe(WS_CHANNELS.toolsEvent, (message) => callback(message.data)),
     },
     projects: {
       searchEntries: (input) =>

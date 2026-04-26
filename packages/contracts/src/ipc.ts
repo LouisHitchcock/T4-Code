@@ -86,6 +86,12 @@ import type {
   ThreadUndoInput,
   ThreadUndoResult,
 } from "./threadFeatures";
+import type {
+  ToolEvent,
+  ToolsExecuteInput,
+  ToolsExecuteResult,
+  ToolsGetResultInput,
+} from "./tools";
 import { EditorId } from "./editor";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -171,6 +177,11 @@ export interface NativeApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
     exec: (input: TerminalExecInput) => Promise<TerminalExecResult>;
     onExecEvent: (callback: (event: TerminalExecEvent) => void) => () => void;
+  };
+  tools: {
+    execute: (input: ToolsExecuteInput) => Promise<ToolsExecuteResult>;
+    getResult: (input: ToolsGetResultInput) => Promise<ToolsExecuteResult>;
+    onEvent: (callback: (event: ToolEvent) => void) => () => void;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;

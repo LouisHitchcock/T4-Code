@@ -19,6 +19,7 @@ import {
   type ProjectSkillName,
 } from "@draft/contracts";
 import { Schema } from "effect";
+import { listWarpWorkflowCommandTemplates } from "./warpWorkflowTemplates.ts";
 
 const AGENTS_FILE_NAME = "AGENTS.md";
 const COMMANDS_DIRECTORY_RELATIVE_PATH = ".draft/commands";
@@ -425,10 +426,7 @@ export function listProjectCommandTemplates(
       .map((entry) => entry.name)
       .toSorted((left, right) => left.localeCompare(right));
   } catch {
-    return {
-      commands: [],
-      issues: [],
-    };
+    fileNames = [];
   }
 
   const commands: ProjectCommandTemplate[] = [];
@@ -442,6 +440,23 @@ export function listProjectCommandTemplates(
       issues.push(parsed.issue);
     }
   }
+
+  const warpWorkflowTemplates = listWarpWorkflowCommandTemplates();
+  const existingNames = new Set(commands.map((command) => command.name.trim().toLowerCase()));
+  for (const workflowCommand of warpWorkflowTemplates.commands) {
+    const normalizedName = workflowCommand.name.trim().toLowerCase();
+    if (existingNames.has(normalizedName)) {
+      issues.push({
+        relativePath: workflowCommand.relativePath,
+        message: `Skipped built-in workflow template '${workflowCommand.name}' because a project template already uses that name.`,
+      });
+      continue;
+    }
+    existingNames.add(normalizedName);
+    commands.push(workflowCommand);
+  }
+  issues.push(...warpWorkflowTemplates.issues);
+
   return { commands, issues };
 }
 
