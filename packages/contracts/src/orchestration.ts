@@ -58,6 +58,14 @@ const CopilotProviderStartOptions = Schema.Struct({
 const OpenCodeProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   openRouterApiKey: Schema.optional(TrimmedNonEmptyString),
+  configContent: Schema.optional(Schema.String.check(Schema.isMaxLength(250_000))),
+  envOverrides: Schema.optional(
+    Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString).check(Schema.isMaxProperties(64)),
+  ),
+  promptTimeoutMs: Schema.optional(
+    NonNegativeInt.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(900_000)),
+  ),
+  useClientToolBridge: Schema.optional(Schema.Boolean),
 });
 export const RuntimeMode = Schema.Literals(["approval-required", "full-access"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
@@ -155,6 +163,7 @@ export const OrchestrationProject = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString),
+  defaultProvider: Schema.NullOr(ProviderKind).pipe(Schema.withDecodingDefault(() => null)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -311,6 +320,7 @@ export const ProjectCreateCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModel: Schema.optional(TrimmedNonEmptyString),
+  defaultProvider: Schema.optional(ProviderKind),
   createdAt: IsoDateTime,
 });
 
@@ -321,6 +331,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModel: Schema.optional(TrimmedNonEmptyString),
+  defaultProvider: Schema.optional(Schema.NullOr(ProviderKind)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
 });
 
@@ -680,6 +691,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModel: Schema.NullOr(TrimmedNonEmptyString),
+  defaultProvider: Schema.NullOr(ProviderKind).pipe(Schema.withDecodingDefault(() => null)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -690,6 +702,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModel: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  defaultProvider: Schema.optional(Schema.NullOr(ProviderKind)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
 });

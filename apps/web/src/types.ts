@@ -78,6 +78,7 @@ export interface Project {
   id: ProjectId;
   name: string;
   cwd: string;
+  provider: ProviderKind;
   model: string;
   expanded: boolean;
   scripts: ProjectScript[];

@@ -24,12 +24,25 @@ import type { Effect } from "effect";
 import type { Stream } from "effect";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "restart-session" | "unsupported";
+export type ProviderOperationSupport = "supported" | "unsupported";
 
 export interface ProviderAdapterCapabilities {
   /**
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  /**
+   * Declares whether this adapter supports structured user-input responses.
+   */
+  readonly structuredUserInput?: ProviderOperationSupport;
+  /**
+   * Declares whether this adapter supports reading provider thread snapshots.
+   */
+  readonly readThread?: ProviderOperationSupport;
+  /**
+   * Declares whether this adapter supports rolling back provider thread state.
+   */
+  readonly rollbackThread?: ProviderOperationSupport;
 }
 
 export interface ProviderThreadTurnSnapshot {

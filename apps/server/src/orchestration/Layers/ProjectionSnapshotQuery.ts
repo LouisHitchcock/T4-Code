@@ -16,6 +16,7 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadActivity,
 } from "@draft/contracts";
+import { inferProviderFromModelSlug } from "@draft/shared/model";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
@@ -143,6 +144,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model AS "defaultModel",
+          default_provider AS "defaultProvider",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -527,6 +529,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             title: row.title,
             workspaceRoot: row.workspaceRoot,
             defaultModel: row.defaultModel,
+            defaultProvider:
+              row.defaultProvider ??
+              (row.defaultModel !== null ? inferProviderFromModelSlug(row.defaultModel) : null),
             scripts: row.scripts,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,

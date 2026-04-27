@@ -27,17 +27,25 @@ describe("sanitizeProviderOptionsForPersistence", () => {
     });
   });
 
-  it("persists the OpenCode binary override without adding extra fields", () => {
+  it("persists trusted OpenCode launch overrides including the bridge toggle", () => {
     expect(
       sanitizeProviderOptionsForPersistence({
         opencode: {
           binaryPath: "/tmp/opencode",
           openRouterApiKey: "sk-or-secret",
+          configContent: "{\"provider\":{\"ollama\":{}}}",
+          envOverrides: {
+            OLLAMA_HOST: "http://localhost:11434",
+          },
+          promptTimeoutMs: 180_000,
+          useClientToolBridge: true,
         },
       }),
     ).toEqual({
       opencode: {
         binaryPath: "/tmp/opencode",
+        promptTimeoutMs: 180_000,
+        useClientToolBridge: true,
       },
     });
   });
@@ -62,17 +70,25 @@ describe("sanitizeProviderOptionsRecordForPersistence", () => {
     });
   });
 
-  it("keeps trusted OpenCode binary overrides from runtime payloads", () => {
+  it("keeps trusted OpenCode launch overrides from runtime payloads", () => {
     expect(
       sanitizeProviderOptionsRecordForPersistence({
         opencode: {
           binaryPath: "/tmp/opencode",
           openRouterApiKey: "sk-or-secret",
+          configContent: "{\"provider\":{\"ollama\":{}}}",
+          envOverrides: {
+            OLLAMA_HOST: "http://localhost:11434",
+          },
+          promptTimeoutMs: 180_000,
+          useClientToolBridge: true,
         },
       }),
     ).toEqual({
       opencode: {
         binaryPath: "/tmp/opencode",
+        promptTimeoutMs: 180_000,
+        useClientToolBridge: true,
       },
     });
   });

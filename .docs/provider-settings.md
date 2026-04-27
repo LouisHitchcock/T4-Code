@@ -39,10 +39,16 @@ The **Providers** section supports local overrides for each provider runtime:
   - Custom binary path
 - **OpenCode**
   - Custom binary path
+  - Optional inline OpenCode config JSON override (`OPENCODE_CONFIG_CONTENT`) for per-session local runtime settings (for example Ollama base URL/provider blocks)
+  - Optional OpenCode environment overrides (up to 64 key/value entries, uppercase env-style keys)
+  - Optional OpenCode prompt timeout override (`1s` to `900s`, default `120s`) for ACP turn watchdog behavior
   - OpenCode account authentication stays in OpenCode itself via `opencode auth login` and `opencode auth logout`; Draft does not store those credentials in this phase
   - MCP server auth/debug remains server-specific in OpenCode via commands such as `opencode mcp auth <server>` and `opencode mcp debug <server>`
   - The OpenCode settings panel inspects `opencode auth list`, `opencode mcp list`, `opencode mcp auth list`, and the resolved OpenCode config paths so users can see current provider credentials, MCP connectivity, and copyable auth/debug commands without leaving Draft
   - When the top-level Draft OpenRouter key is set, new OpenCode sessions also inherit it as `OPENROUTER_API_KEY` so OpenCode provider configs can reference it through `{env:OPENROUTER_API_KEY}`
+  - When you explicitly select a non-default OpenCode model, Draft now fails fast if ACP reports that model as unavailable instead of silently falling back
+  - If an OpenCode prompt/retry exceeds the configured timeout, Draft emits a timeout warning, attempts cancellation, marks the turn failed, and keeps the session recoverable for the next turn
+  - OpenCode currently does not support Draft structured user-input responses, provider thread snapshot reads, or provider rollback operations in this integration
 - **Kimi Code**
   - Custom binary path
   - Optional API key stored locally and injected into new Kimi CLI sessions

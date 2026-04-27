@@ -533,6 +533,77 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("blocks structured user-input responses when adapter capability is unsupported", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const originalCapabilities = routing.codex.adapter.capabilities;
+      (routing.codex.adapter as any).capabilities = {
+        ...originalCapabilities,
+        structuredUserInput: "unsupported",
+      };
+      routing.codex.respondToUserInput.mockClear();
+      try {
+        yield* provider.startSession(asThreadId("thread-capability-user-input"), {
+          provider: "codex",
+          threadId: asThreadId("thread-capability-user-input"),
+          runtimeMode: "full-access",
+        });
+        const result = yield* provider
+          .respondToUserInput({
+            threadId: asThreadId("thread-capability-user-input"),
+            requestId: asRequestId("req-unsupported-user-input"),
+            answers: { confirm: true },
+          })
+          .pipe(Effect.result);
+        assertFailure(
+          result,
+          new ProviderValidationError({
+            operation: "ProviderService.respondToUserInput",
+            issue: "Provider 'codex' does not support structured user-input responses.",
+          }),
+        );
+        assert.equal(routing.codex.respondToUserInput.mock.calls.length, 0);
+      } finally {
+        (routing.codex.adapter as any).capabilities = originalCapabilities;
+      }
+    }),
+  );
+
+  it.effect("blocks rollback requests when adapter capability is unsupported", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const originalCapabilities = routing.codex.adapter.capabilities;
+      (routing.codex.adapter as any).capabilities = {
+        ...originalCapabilities,
+        rollbackThread: "unsupported",
+      };
+      routing.codex.rollbackThread.mockClear();
+      try {
+        yield* provider.startSession(asThreadId("thread-capability-rollback"), {
+          provider: "codex",
+          threadId: asThreadId("thread-capability-rollback"),
+          runtimeMode: "full-access",
+        });
+        const result = yield* provider
+          .rollbackConversation({
+            threadId: asThreadId("thread-capability-rollback"),
+            numTurns: 1,
+          })
+          .pipe(Effect.result);
+        assertFailure(
+          result,
+          new ProviderValidationError({
+            operation: "ProviderService.rollbackConversation",
+            issue: "Provider 'codex' does not support rollback for this integration.",
+          }),
+        );
+        assert.equal(routing.codex.rollbackThread.mock.calls.length, 0);
+      } finally {
+        (routing.codex.adapter as any).capabilities = originalCapabilities;
+      }
+    }),
+  );
+
   it.effect("recovers stale sessions for sendTurn using persisted cwd", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;

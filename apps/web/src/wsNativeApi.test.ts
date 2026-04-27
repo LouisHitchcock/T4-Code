@@ -317,6 +317,7 @@ describe("wsNativeApi", () => {
         title: "Project",
         workspaceRoot: "/tmp/workspace",
         defaultModel: null,
+        defaultProvider: null,
         scripts: [],
         createdAt: "2026-02-24T00:00:00.000Z",
         updatedAt: "2026-02-24T00:00:00.000Z",
@@ -341,6 +342,7 @@ describe("wsNativeApi", () => {
       projectId: ProjectId.makeUnsafe("project-1"),
       title: "Project",
       workspaceRoot: "/tmp/project",
+      defaultProvider: "codex",
       defaultModel: "gpt-5-codex",
       createdAt: "2026-02-24T00:00:00.000Z",
     } as const;

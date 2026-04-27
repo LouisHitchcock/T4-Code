@@ -87,6 +87,7 @@ export function useProjectCreationActions() {
           projectId,
           title: titleFromWorkspacePath(cwd),
           workspaceRoot: cwd,
+          defaultProvider: "codex",
           defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
           createdAt: new Date().toISOString(),
         });

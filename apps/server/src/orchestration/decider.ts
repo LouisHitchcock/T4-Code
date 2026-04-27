@@ -5,6 +5,7 @@ import type {
   OrchestrationThread,
 } from "@draft/contracts";
 import { Effect } from "effect";
+import { inferProviderFromModelSlug } from "@draft/shared/model";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { sanitizeProviderOptionsForPersistence } from "../provider/providerOptions.ts";
@@ -385,6 +386,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           defaultModel: command.defaultModel ?? null,
+          defaultProvider: command.defaultProvider ?? inferProviderFromModelSlug(command.defaultModel),
           scripts: [],
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
@@ -399,6 +401,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: command.projectId,
       });
       const occurredAt = nowIso();
+      const resolvedDefaultProvider =
+        command.defaultProvider !== undefined
+          ? command.defaultProvider
+          : command.defaultModel !== undefined
+            ? inferProviderFromModelSlug(command.defaultModel)
+            : undefined;
       return {
         ...withEventBase({
           aggregateKind: "project",
@@ -412,6 +420,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
           ...(command.defaultModel !== undefined ? { defaultModel: command.defaultModel } : {}),
+          ...(resolvedDefaultProvider !== undefined
+            ? { defaultProvider: resolvedDefaultProvider }
+            : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           updatedAt: occurredAt,
         },

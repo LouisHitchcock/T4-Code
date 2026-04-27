@@ -196,6 +196,42 @@ export function isCodexOpenRouterModel(model: string | null | undefined): boolea
   return normalized.includes("/") || normalized.endsWith(":free");
 }
 
+export function inferProviderFromModelSlug(model: string | null | undefined): ProviderKind {
+  const normalized = normalizeModelSlug(model, "codex");
+  if (!normalized) {
+    return "codex";
+  }
+
+  if (normalized.startsWith("opencode/") || normalized.startsWith("ollama/")) {
+    return "opencode";
+  }
+
+  if (isKnownModelSlug(normalized, "pi", { includeLegacy: true })) {
+    return "pi";
+  }
+
+  if (isKnownModelSlug(normalized, "opencode", { includeLegacy: true })) {
+    return "opencode";
+  }
+
+  if (isKnownModelSlug(normalized, "kimi", { includeLegacy: true }) || normalized.startsWith("kimi")) {
+    return "kimi";
+  }
+
+  if (
+    isCodexOpenRouterModel(normalized) ||
+    isKnownModelSlug(normalized, "codex", { includeLegacy: true })
+  ) {
+    return "codex";
+  }
+
+  if (isKnownModelSlug(normalized, "copilot", { includeLegacy: true })) {
+    return "copilot";
+  }
+
+  return "codex";
+}
+
 export function resolveModelSlug(
   model: string | null | undefined,
   provider: ProviderKind = "codex",

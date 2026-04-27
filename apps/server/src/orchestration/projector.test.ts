@@ -214,6 +214,96 @@ describe("orchestration projector", () => {
     expect(thread?.session?.status).toBe("running");
   });
 
+  it("ignores stale thread.session-set updates with older session.updatedAt", async () => {
+    const createdAt = "2026-02-23T08:00:00.000Z";
+    const latestSessionAt = "2026-02-23T08:00:10.000Z";
+    const staleSessionAt = "2026-02-23T08:00:01.000Z";
+    const model = createEmptyReadModel(createdAt);
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            model: "gpt-5.3-codex",
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const afterLatest = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.session-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: latestSessionAt,
+          commandId: "cmd-ready",
+          payload: {
+            threadId: "thread-1",
+            session: {
+              threadId: "thread-1",
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: latestSessionAt,
+            },
+          },
+        }),
+      ),
+    );
+
+    const afterStale = await Effect.runPromise(
+      projectEvent(
+        afterLatest,
+        makeEvent({
+          sequence: 3,
+          type: "thread.session-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: latestSessionAt,
+          commandId: "cmd-running-stale",
+          payload: {
+            threadId: "thread-1",
+            session: {
+              threadId: "thread-1",
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "approval-required",
+              activeTurnId: "turn-stale",
+              lastError: null,
+              updatedAt: staleSessionAt,
+            },
+          },
+        }),
+      ),
+    );
+
+    const thread = afterStale.threads[0];
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.activeTurnId).toBeNull();
+    expect(thread?.session?.updatedAt).toBe(latestSessionAt);
+    expect(thread?.latestTurn).toBeNull();
+  });
+
   it("updates canonical thread runtime mode from thread.runtime-mode-set", async () => {
     const createdAt = "2026-02-23T08:00:00.000Z";
     const updatedAt = "2026-02-23T08:00:05.000Z";

@@ -15,6 +15,7 @@ function queuedTurn(overrides: Partial<QueuedThreadTurn> = {}): QueuedThreadTurn
     serviceTier: null,
     runtimeMode: "full-access",
     interactionMode: "default",
+    selectionSource: "manual",
     skillNames: [],
     createdAt: "2026-03-26T10:00:00.000Z",
     mode: "queue",

@@ -93,6 +93,21 @@ describe("ProviderSessionStartInput", () => {
         opencode: {
           binaryPath: "/usr/local/bin/opencode",
           openRouterApiKey: "sk-or-test",
+          configContent: JSON.stringify({
+            provider: {
+              ollama: {
+                options: {
+                  baseURL: "http://localhost:11434/v1",
+                },
+              },
+            },
+          }),
+          envOverrides: {
+            OLLAMA_HOST: "http://localhost:11434",
+            OPENCODE_ENABLE_EXA: "1",
+          },
+          promptTimeoutMs: 120_000,
+          useClientToolBridge: true,
         },
       },
     });
@@ -101,6 +116,13 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.model).toBe("minimax-coding-plan/MiniMax-M2.7");
     expect(parsed.providerOptions?.opencode?.binaryPath).toBe("/usr/local/bin/opencode");
     expect(parsed.providerOptions?.opencode?.openRouterApiKey).toBe("sk-or-test");
+    expect(parsed.providerOptions?.opencode?.configContent).toContain("localhost:11434/v1");
+    expect(parsed.providerOptions?.opencode?.envOverrides).toEqual({
+      OLLAMA_HOST: "http://localhost:11434",
+      OPENCODE_ENABLE_EXA: "1",
+    });
+    expect(parsed.providerOptions?.opencode?.promptTimeoutMs).toBe(120_000);
+    expect(parsed.providerOptions?.opencode?.useClientToolBridge).toBe(true);
   });
 
   it("accepts pi-compatible payloads without provider-specific overrides", () => {

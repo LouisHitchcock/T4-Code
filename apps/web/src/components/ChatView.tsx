@@ -302,6 +302,7 @@ import {
 import { type AppLanguage } from "../appLanguage";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { buildNewThreadDraftContextPatch } from "../lib/newThreadDraftContext";
+import { type ModelSelectionSource } from "../modelSelectionSource";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -404,6 +405,9 @@ function buildProviderOptionsForDispatch(input: {
     readonly openRouterApiKey: string;
     readonly copilotBinaryPath: string;
     readonly opencodeBinaryPath: string;
+    readonly opencodeConfigContent: string;
+    readonly opencodeEnvOverrides: Record<string, string>;
+    readonly opencodePromptTimeoutMs: number;
     readonly kimiBinaryPath: string;
     readonly kimiApiKey: string;
   };
@@ -414,6 +418,13 @@ function buildProviderOptionsForDispatch(input: {
   const openRouterApiKey = input.settings.openRouterApiKey.trim();
   const copilotBinaryPath = input.settings.copilotBinaryPath.trim();
   const opencodeBinaryPath = input.settings.opencodeBinaryPath.trim();
+  const opencodeConfigContent = input.settings.opencodeConfigContent.trim();
+  const opencodeEnvOverrides = Object.fromEntries(
+    Object.entries(input.settings.opencodeEnvOverrides).filter(
+      ([key, value]) => key.trim().length > 0 && value.trim().length > 0,
+    ),
+  );
+  const opencodePromptTimeoutMs = Math.round(input.settings.opencodePromptTimeoutMs);
   const kimiBinaryPath = input.settings.kimiBinaryPath.trim();
   const kimiApiKey = input.settings.kimiApiKey.trim();
 
@@ -438,11 +449,25 @@ function buildProviderOptionsForDispatch(input: {
           }
         : undefined;
     case "opencode":
-      return opencodeBinaryPath || openRouterApiKey
+      return (
+        opencodeBinaryPath ||
+        openRouterApiKey ||
+        opencodeConfigContent ||
+        Object.keys(opencodeEnvOverrides).length > 0 ||
+        Number.isInteger(opencodePromptTimeoutMs)
+      )
         ? {
             opencode: {
               ...(opencodeBinaryPath ? { binaryPath: opencodeBinaryPath } : {}),
               ...(openRouterApiKey ? { openRouterApiKey } : {}),
+              ...(opencodeConfigContent ? { configContent: opencodeConfigContent } : {}),
+              ...(Object.keys(opencodeEnvOverrides).length > 0
+                ? { envOverrides: opencodeEnvOverrides }
+                : {}),
+              ...(Number.isInteger(opencodePromptTimeoutMs) && opencodePromptTimeoutMs > 0
+                ? { promptTimeoutMs: opencodePromptTimeoutMs }
+                : {}),
+              useClientToolBridge: true,
             },
           }
         : undefined;
@@ -463,6 +488,9 @@ function buildProviderOptionsForDispatch(input: {
 }
 
 function resolveTemporaryForcedProvider(): ProviderKind | null {
+  return null;
+}
+function resolveTemporaryCoordinatorSelectionSourceOverride(): ModelSelectionSource | null {
   return null;
 }
 
@@ -686,6 +714,7 @@ function buildExpandedImagePreview(
 function buildLocalDraftThread(
   threadId: ThreadId,
   draftThread: DraftThreadState,
+  fallbackProvider: ProviderKind,
   fallbackModel: string,
   error: string | null,
 ): Thread {
@@ -694,6 +723,7 @@ function buildLocalDraftThread(
     codexThreadId: null,
     projectId: draftThread.projectId,
     title: "New thread",
+    provider: fallbackProvider,
     model: fallbackModel,
     runtimeMode: draftThread.runtimeMode,
     interactionMode: draftThread.interactionMode,
@@ -1488,11 +1518,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ? buildLocalDraftThread(
             threadId,
             draftThread,
-            fallbackDraftProject?.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+            fallbackDraftProject?.provider ?? "codex",
+            fallbackDraftProject?.model ??
+              DEFAULT_MODEL_BY_PROVIDER[fallbackDraftProject?.provider ?? "codex"],
             localDraftError,
           )
         : undefined,
-    [draftThread, fallbackDraftProject?.model, localDraftError, threadId],
+    [draftThread, fallbackDraftProject?.model, fallbackDraftProject?.provider, localDraftError, threadId],
   );
   const activeThread = serverThread ?? localDraftThread;
   const runtimeMode =
@@ -1612,11 +1644,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     markThreadVisited,
   ]);
 
-  const sessionProvider = activeThread?.session?.provider ?? activeThread?.provider ?? null;
+  const liveSessionProvider = activeThread?.session?.provider ?? null;
+  const sessionProvider = liveSessionProvider ?? activeThread?.provider ?? null;
   const selectedProviderByThreadId = composerDraft.provider;
   const selectedServiceTierSetting = settings.codexServiceTier;
   const selectedServiceTier = resolveAppServiceTier(selectedServiceTierSetting);
   const lockedProvider: ProviderKind | null = resolveTemporaryForcedProvider();
+  const coordinatorSelectionSourceOverride = resolveTemporaryCoordinatorSelectionSourceOverride();
   const selectedProvider: ProviderKind =
     lockedProvider ?? selectedProviderByThreadId ?? sessionProvider ?? "codex";
   useEffect(() => {
@@ -1632,12 +1666,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (selectedProviderByThreadId !== null) {
       return;
     }
-    setComposerDraftProvider(activeThread.id, sessionProvider ?? "codex");
+    if (liveSessionProvider !== null) {
+      setComposerDraftProvider(activeThread.id, liveSessionProvider);
+    }
   }, [
     activeThread?.id,
+    liveSessionProvider,
     lockedProvider,
     selectedProviderByThreadId,
-    sessionProvider,
     setComposerDraftProvider,
   ]);
   const [providerStatusModelOptionsByProvider, setProviderStatusModelOptionsByProvider] = useState<
@@ -1897,6 +1933,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => getProviderPickerKindForSelection(selectedProvider, selectedModel),
     [selectedModel, selectedProvider],
   );
+  const projectDefaultSelection = useMemo(() => {
+    if (!activeProject) {
+      return null;
+    }
+
+    const provider = activeProject.provider;
+    const model = resolveAppModelSelection(
+      provider,
+      allModelOptionsByProvider[provider].map((option) => option.slug),
+      activeProject.model || DEFAULT_MODEL_BY_PROVIDER[provider],
+    ) as ModelSlug;
+    return {
+      provider,
+      model,
+      providerPickerKind: getProviderPickerKindForSelection(provider, model),
+    };
+  }, [activeProject, allModelOptionsByProvider]);
+  const hasExplicitThreadModelOverride =
+    composerDraft.provider !== null || composerDraft.model !== null;
+  const selectedModelSelectionSource: ModelSelectionSource = useMemo(() => {
+    if (coordinatorSelectionSourceOverride !== null) {
+      return coordinatorSelectionSourceOverride;
+    }
+    if (
+      !hasExplicitThreadModelOverride &&
+      projectDefaultSelection &&
+      selectedProviderPickerKind === projectDefaultSelection.providerPickerKind &&
+      selectedModel === projectDefaultSelection.model
+    ) {
+      return "project-default";
+    }
+    return "manual";
+  }, [
+    coordinatorSelectionSourceOverride,
+    hasExplicitThreadModelOverride,
+    projectDefaultSelection,
+    selectedModel,
+    selectedProviderPickerKind,
+  ]);
   const selectedModelUsesOpenRouter =
     selectedProvider === "codex" && isCodexOpenRouterModel(selectedModel);
   const codexAuthSourceIndicator = useMemo(() => {
@@ -5439,7 +5514,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             model:
               (activeThread.model as ModelSlug) ||
               (activeProject.model as ModelSlug) ||
-              DEFAULT_MODEL_BY_PROVIDER.codex,
+              DEFAULT_MODEL_BY_PROVIDER[activeProject.provider],
             runtimeMode,
             interactionMode,
             branch: activeThread.branch,
@@ -5583,6 +5658,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           : {}),
         runtimeMode: submission.runtimeModeForSend,
         interactionMode: submission.interactionModeForSend,
+        selectionSource: selectedModelSelectionSource,
         skillNames: submission.selectedSkillNamesForSend,
         createdAt: new Date().toISOString(),
         mode,
@@ -5639,6 +5715,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       isInterruptingTurn,
       isServerThread,
       selectedServiceTier,
+      selectedModelSelectionSource,
       setFollowUpMode,
       setThreadError,
     ],
@@ -5777,6 +5854,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       settings.openAiApiKey,
       settings.openRouterApiKey,
       settings.opencodeBinaryPath,
+      settings.opencodeConfigContent,
+      settings.opencodeEnvOverrides,
+      settings.opencodePromptTimeoutMs,
     ],
   );
 
@@ -5991,7 +6071,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       const title = truncateTitle(titleSeed);
       let threadCreateModel: ModelSlug =
-        modelForSend || (activeProject.model as ModelSlug) || DEFAULT_MODEL_BY_PROVIDER.codex;
+        modelForSend ||
+        (activeProject.model as ModelSlug) ||
+        DEFAULT_MODEL_BY_PROVIDER[providerForSend];
 
       if (isLocalDraftThread) {
         await api.orchestration.dispatchCommand({
@@ -6529,6 +6611,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       settings.openAiApiKey,
       settings.openRouterApiKey,
       settings.opencodeBinaryPath,
+      settings.opencodeConfigContent,
+      settings.opencodeEnvOverrides,
+      settings.opencodePromptTimeoutMs,
     ],
   );
 
@@ -6680,6 +6765,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     settings.openAiApiKey,
     settings.openRouterApiKey,
     settings.opencodeBinaryPath,
+    settings.opencodeConfigContent,
+    settings.opencodeEnvOverrides,
+    settings.opencodePromptTimeoutMs,
     syncServerReadModel,
   ]);
   const saveOpenRouterApiKey = useCallback(() => {
@@ -6783,6 +6871,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
       hiddenPiModels: [],
     });
   }, [updateSettings]);
+  const onAddOpencodeModelPreset = useCallback(
+    (modelSlug: string) => {
+      const normalizedModelSlug = modelSlug.trim();
+      if (!normalizedModelSlug) {
+        return;
+      }
+      const nextHiddenOpencodeModels = settings.hiddenOpencodeModels.filter(
+        (hiddenModel) => hiddenModel !== normalizedModelSlug,
+      );
+      if (settings.customOpencodeModels.includes(normalizedModelSlug)) {
+        if (nextHiddenOpencodeModels.length !== settings.hiddenOpencodeModels.length) {
+          updateSettings({ hiddenOpencodeModels: nextHiddenOpencodeModels });
+        }
+        toastManager.add({
+          type: "info",
+          title: "OpenCode model already added",
+          description: normalizedModelSlug,
+        });
+        return;
+      }
+      updateSettings({
+        customOpencodeModels: [...settings.customOpencodeModels, normalizedModelSlug],
+        hiddenOpencodeModels: nextHiddenOpencodeModels,
+      });
+      toastManager.add({
+        type: "success",
+        title: "OpenCode model preset added",
+        description: normalizedModelSlug,
+      });
+    },
+    [settings.customOpencodeModels, settings.hiddenOpencodeModels, updateSettings],
+  );
   useEffect(() => {
     if (!activeThread) {
       return;
@@ -6819,6 +6939,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setIsManageModelsDialogOpen(false);
     setIsProviderSetupDialogOpen(true);
   }, []);
+  const openOpenRouterApiKeyDialogFromManageModels = useCallback(() => {
+    setIsManageModelsDialogOpen(false);
+    openOpenRouterApiKeyDialog(null);
+  }, [openOpenRouterApiKeyDialog]);
+  const openKimiApiKeyDialogFromManageModels = useCallback(() => {
+    setIsManageModelsDialogOpen(false);
+    openKimiApiKeyDialog(null);
+  }, [openKimiApiKeyDialog]);
+  const openSettingsFromManageModels = useCallback(() => {
+    setIsManageModelsDialogOpen(false);
+    void navigate({ to: "/settings" });
+  }, [navigate]);
   const openOpenRouterApiKeyDialogFromProviderSetup = useCallback(() => {
     setIsProviderSetupDialogOpen(false);
     openOpenRouterApiKeyDialog(null);
@@ -6903,6 +7035,50 @@ export default function ChatView({ threadId }: ChatViewProps) {
       onProviderModelSelect(backingProvider, model);
     },
     [onProviderModelSelect],
+  );
+  const onSetProjectDefaultModelFromPicker = useCallback(
+    async (providerPickerKind: AvailableProviderPickerKind, model: ModelSlug) => {
+      if (!activeProject) {
+        return;
+      }
+      const backingProvider = getProviderPickerBackingProvider(providerPickerKind);
+      if (!backingProvider) {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+
+      const defaultModel = resolveAppModelSelection(
+        backingProvider,
+        allModelOptionsByProvider[backingProvider].map((option) => option.slug),
+        model,
+      ) as ModelSlug;
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "project.meta.update",
+          commandId: newCommandId(),
+          projectId: activeProject.id,
+          defaultProvider: backingProvider,
+          defaultModel,
+        });
+        toastManager.add({
+          type: "success",
+          title: "Default model updated",
+          description: `${activeProject.name} now defaults to ${getModelDisplayName(defaultModel, backingProvider)} for new tabs.`,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not update project default",
+          description: error instanceof Error ? error.message : "Unexpected error.",
+        });
+      } finally {
+        scheduleComposerFocus();
+      }
+    },
+    [activeProject, allModelOptionsByProvider, scheduleComposerFocus],
   );
   const onEffortSelect = useCallback(
     (effort: ProviderReasoningLevel | null) => {
@@ -8045,6 +8221,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         opencodeContextLengthsBySlug={openCodeContextLengthsBySlug}
                         serviceTierSetting={selectedServiceTierSetting}
                         hasHiddenModels={hasHiddenPickerModels}
+                        projectDefaultProvider={projectDefaultSelection?.provider ?? null}
+                        projectDefaultModel={projectDefaultSelection?.model ?? null}
+                        modelSelectionSource={selectedModelSelectionSource}
                         favoriteModelsByProvider={{
                           codex: providerFavoriteModelSettings.favoriteCodexModels,
                           copilot: providerFavoriteModelSettings.favoriteCopilotModels,
@@ -8063,6 +8242,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         onOpenManageModels={openManageModelsDialog}
                         onOpenUsageDashboard={() => setIsUsageDashboardOpen(true)}
                         onProviderModelChange={onProviderModelSelectFromPicker}
+                        onSetProjectDefaultModel={onSetProjectDefaultModelFromPicker}
                       />
                       {codexAuthSourceIndicator ? (
                         <Tooltip>
@@ -8848,10 +9028,31 @@ export default function ChatView({ threadId }: ChatViewProps) {
         openRouterContextLengthsBySlug={openRouterContextLengthsBySlug}
         opencodeContextLengthsBySlug={openCodeContextLengthsBySlug}
         serviceTierSetting={selectedServiceTierSetting}
+        hasOpenAiApiKey={settings.openAiApiKey.trim().length > 0}
+        hasOpenRouterApiKey={settings.openRouterApiKey.trim().length > 0}
+        hasKimiApiKey={settings.kimiApiKey.trim().length > 0}
+        openCodeCredentialCount={
+          openCodeStateQuery.data?.status === "available" ? openCodeStateQuery.data.credentials.length : 0
+        }
+        openCodeModelCount={
+          openCodeStateQuery.data?.status === "available" ? openCodeStateQuery.data.models.length : 0
+        }
+        openCodeMcpServerCount={
+          openCodeStateQuery.data?.status === "available" && openCodeStateQuery.data.mcpSupported
+            ? openCodeStateQuery.data.mcpServers.length
+            : 0
+        }
+        customOpencodeModels={settings.customOpencodeModels}
+        isRefreshingProviderStatus={isRefreshingProviderSetupState}
         onFavoriteModelChange={onFavoriteModelChange}
         onModelVisibilityChange={onModelVisibilityChange}
         onShowAll={showAllManagedModels}
         onOpenProviderSetup={openProviderSetupFromManageModels}
+        onOpenSettings={openSettingsFromManageModels}
+        onOpenOpenRouterKeyDialog={openOpenRouterApiKeyDialogFromManageModels}
+        onOpenKimiKeyDialog={openKimiApiKeyDialogFromManageModels}
+        onRefreshProviderStatus={refreshProviderSetupState}
+        onAddOpencodeModelPreset={onAddOpencodeModelPreset}
       />
 
       <Dialog
@@ -10517,10 +10718,23 @@ function ManageModelsDialog(props: {
   openRouterContextLengthsBySlug: ReadonlyMap<string, number | null>;
   opencodeContextLengthsBySlug: ReadonlyMap<string, number | null>;
   serviceTierSetting: AppServiceTier;
+  hasOpenAiApiKey: boolean;
+  hasOpenRouterApiKey: boolean;
+  hasKimiApiKey: boolean;
+  openCodeCredentialCount: number;
+  openCodeModelCount: number;
+  openCodeMcpServerCount: number;
+  customOpencodeModels: ReadonlyArray<string>;
+  isRefreshingProviderStatus: boolean;
   onFavoriteModelChange: (provider: ProviderKind, model: string, favorite: boolean) => void;
   onModelVisibilityChange: (provider: ProviderKind, model: string, visible: boolean) => void;
   onShowAll: () => void;
   onOpenProviderSetup: () => void;
+  onOpenSettings: () => void;
+  onOpenOpenRouterKeyDialog: () => void;
+  onOpenKimiKeyDialog: () => void;
+  onRefreshProviderStatus: () => void;
+  onAddOpencodeModelPreset: (modelSlug: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const copy =
@@ -10544,6 +10758,20 @@ function ManageModelsDialog(props: {
           unpin: "برداشتن سنجاق",
           recent: "اخیر",
           providerSetup: "آماده سازی ارائه دهنده",
+          credentialsTitle: "اعتبارها و runtime",
+          credentialsDescription:
+            "کلیدهای ارائه دهنده و کشف مدل های OpenCode را بدون خروج از این پنجره مدیریت کنید.",
+          saved: "ذخیره شده",
+          missing: "نیازمند تنظیم",
+          openAiKey: "کلید OpenAI",
+          openRouterKey: "کلید OpenRouter",
+          kimiKey: "کلید Kimi",
+          openAiInSettings: "کلید OpenAI در تنظیمات",
+          refreshOpenCode: "نوسازی مدل های OpenCode",
+          addOllamaPreset: "افزودن preset Ollama",
+          opencodeSnapshot: (credentials: number, models: number, mcpServers: number) =>
+            `${credentials} اعتبار · ${models} مدل · ${mcpServers} سرور MCP`,
+          customOpenCodeCount: (count: number) => `${count} مدل سفارشی OpenCode`,
           done: "انجام شد",
         }
       : {
@@ -10565,6 +10793,20 @@ function ManageModelsDialog(props: {
           unpin: "Unpin",
           recent: "Recent",
           providerSetup: "Provider readiness",
+          credentialsTitle: "Credentials & runtime",
+          credentialsDescription:
+            "Manage provider keys and OpenCode model discovery without leaving this dialog.",
+          saved: "Saved",
+          missing: "Needs setup",
+          openAiKey: "OpenAI key",
+          openRouterKey: "OpenRouter key",
+          kimiKey: "Kimi key",
+          openAiInSettings: "OpenAI key in Settings",
+          refreshOpenCode: "Refresh OpenCode models",
+          addOllamaPreset: "Add Ollama preset",
+          opencodeSnapshot: (credentials: number, models: number, mcpServers: number) =>
+            `${credentials} credentials · ${models} models · ${mcpServers} MCP servers`,
+          customOpenCodeCount: (count: number) => `${count} custom OpenCode model${count === 1 ? "" : "s"}`,
           done: "Done",
         };
   const totalHiddenCount =
@@ -10573,6 +10815,7 @@ function ManageModelsDialog(props: {
     props.hiddenModelsByProvider.hiddenOpencodeModels.length +
     props.hiddenModelsByProvider.hiddenKimiModels.length +
     props.hiddenModelsByProvider.hiddenPiModels.length;
+  const ollamaPresetModels = ["ollama/llama3.2:latest", "ollama/qwen2.5-coder:latest"] as const;
 
   useEffect(() => {
     if (!props.open) {
@@ -10701,6 +10944,67 @@ function ManageModelsDialog(props: {
               >
                 {copy.showAllHidden}
               </Button>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-border/60 bg-muted/15 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <p className="font-medium text-sm text-foreground">{copy.credentialsTitle}</p>
+                <p className="text-xs text-muted-foreground">{copy.credentialsDescription}</p>
+                <p className="text-xs text-muted-foreground">
+                  {copy.opencodeSnapshot(
+                    props.openCodeCredentialCount,
+                    props.openCodeModelCount,
+                    props.openCodeMcpServerCount,
+                  )}
+                  {" · "}
+                  {copy.customOpenCodeCount(props.customOpencodeModels.length)}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={props.onRefreshProviderStatus}
+                disabled={props.isRefreshingProviderStatus}
+              >
+                <RefreshCwIcon
+                  className={cn("size-4", props.isRefreshingProviderStatus && "animate-spin")}
+                />
+                {copy.refreshOpenCode}
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge variant={props.hasOpenAiApiKey ? "success" : "warning"} size="sm">
+                {copy.openAiKey}: {props.hasOpenAiApiKey ? copy.saved : copy.missing}
+              </Badge>
+              <Badge variant={props.hasOpenRouterApiKey ? "success" : "warning"} size="sm">
+                {copy.openRouterKey}: {props.hasOpenRouterApiKey ? copy.saved : copy.missing}
+              </Badge>
+              <Badge variant={props.hasKimiApiKey ? "success" : "warning"} size="sm">
+                {copy.kimiKey}: {props.hasKimiApiKey ? copy.saved : copy.missing}
+              </Badge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button size="xs" variant="outline" onClick={props.onOpenSettings}>
+                {copy.openAiInSettings}
+              </Button>
+              <Button size="xs" variant="outline" onClick={props.onOpenOpenRouterKeyDialog}>
+                {copy.openRouterKey}
+              </Button>
+              <Button size="xs" variant="outline" onClick={props.onOpenKimiKeyDialog}>
+                {copy.kimiKey}
+              </Button>
+              {ollamaPresetModels.map((modelSlug) => (
+                <Button
+                  key={modelSlug}
+                  size="xs"
+                  variant="outline"
+                  onClick={() => props.onAddOpencodeModelPreset(modelSlug)}
+                >
+                  <PlusIcon className="size-3.5" />
+                  {copy.addOllamaPreset} · {modelSlug}
+                </Button>
+              ))}
             </div>
           </div>
 

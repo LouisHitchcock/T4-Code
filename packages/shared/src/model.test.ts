@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL_BY_PROVIDER, MODEL_OPTIONS_BY_PROVIDER } from "@draft/contracts";
 
 import {
+  inferProviderFromModelSlug,
   getDefaultModel,
   getModelContextWindowInfo,
   getModelDisplayName,
@@ -156,5 +157,27 @@ describe("getDefaultReasoningEffort", () => {
     expect(getDefaultReasoningEffort("kimi")).toBeNull();
     expect(getDefaultReasoningEffort("copilot")).toBe("high");
     expect(getDefaultReasoningEffort("pi")).toBeNull();
+  });
+});
+
+describe("inferProviderFromModelSlug", () => {
+  it("infers codex for codex and openrouter slugs", () => {
+    expect(inferProviderFromModelSlug("gpt-5.4")).toBe("codex");
+    expect(inferProviderFromModelSlug("openrouter/free")).toBe("codex");
+    expect(inferProviderFromModelSlug("openrouter/anthropic/claude-3.7:free")).toBe("codex");
+  });
+
+  it("infers opencode for explicit opencode and ollama-prefixed slugs", () => {
+    expect(inferProviderFromModelSlug("opencode/default")).toBe("opencode");
+    expect(inferProviderFromModelSlug("opencode/custom-model")).toBe("opencode");
+    expect(inferProviderFromModelSlug("ollama/llama3.2")).toBe("opencode");
+  });
+
+  it("infers provider-specific known slugs and defaults unknown to codex", () => {
+    expect(inferProviderFromModelSlug("claude-sonnet-4.5")).toBe("copilot");
+    expect(inferProviderFromModelSlug("kimi-for-coding")).toBe("kimi");
+    expect(inferProviderFromModelSlug("pi/default")).toBe("pi");
+    expect(inferProviderFromModelSlug("unknown/provider-model")).toBe("codex");
+    expect(inferProviderFromModelSlug(null)).toBe("codex");
   });
 });

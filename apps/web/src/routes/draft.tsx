@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  type ModelSlug,
   type ProviderApprovalDecision,
   type ProviderKind,
   type ServerProviderStatus,
@@ -56,6 +57,7 @@ import ThreadSidebarToggle from "../components/ThreadSidebarToggle";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { OpenInPicker } from "../components/chat/OpenInPicker";
 import { ComposerPendingApprovalActions } from "../components/chat/ComposerPendingApprovalActions";
+import { ProviderModelPicker, type PickerModelOption } from "../components/chat/ProviderModelPicker";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../components/ui/menu";
@@ -68,7 +70,7 @@ import {
 import { buildPatchCacheKey, resolveDiffThemeName } from "../lib/diffRendering";
 import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { serverConfigQueryOptions } from "../lib/serverReactQuery";
+import { serverConfigQueryOptions, serverOpenCodeStateQueryOptions } from "../lib/serverReactQuery";
 import { newCommandId, newMessageId, newThreadId, randomUUID } from "../lib/utils";
 import { resolveShortcutCommand } from "../keybindings";
 import { readNativeApi } from "../nativeApi";
@@ -79,6 +81,9 @@ import {
   derivePendingUserInputs,
   deriveTimelineEntries,
   deriveWorkLogEntries,
+  getProviderPickerBackingProvider,
+  getProviderPickerKindForSelection,
+  type AvailableProviderPickerKind,
   type PendingApproval,
   type PendingUserInput,
   type WorkLogEntry,
@@ -118,6 +123,7 @@ interface RuntimeNotice {
   id: string;
   tone: "success" | "error" | "info";
   text: string;
+  kind: "general" | "status-continuity";
 }
 interface DraftTerminalRunEntry {
   id: string;
@@ -150,23 +156,66 @@ function formatDraftContextUsage(input: { usedTokens: number | null; totalTokens
   return "context n/a";
 }
 
-function resolveDraftModelOptions(input: {
+function resolveDraftPickerModelOptionsByProvider(input: {
   providerStatuses: ReadonlyArray<ServerProviderStatus>;
-  provider: ProviderKind;
-  currentModel: string;
-}): string[] {
-  const status = input.providerStatuses.find((entry) => entry.provider === input.provider);
-  const fromStatus = (status?.availableModels ?? [])
-    .map((entry) => entry.slug.trim())
-    .filter((slug) => slug.length > 0);
-  const options = new Set<string>(fromStatus);
-  if (input.currentModel.trim().length > 0) {
-    options.add(input.currentModel.trim());
+  selectedProvider: ProviderKind;
+  selectedModel: string;
+  projectDefaultProvider: ProviderKind | null;
+  projectDefaultModel: string | null;
+}): Record<ProviderKind, ReadonlyArray<PickerModelOption>> {
+  const byProvider: Record<ProviderKind, PickerModelOption[]> = {
+    codex: [],
+    copilot: [],
+    opencode: [],
+    kimi: [],
+    pi: [],
+  };
+  const seenByProvider = new Map<ProviderKind, Set<string>>();
+  const appendOption = (provider: ProviderKind, option: PickerModelOption) => {
+    const normalizedSlug = option.slug.trim();
+    if (!normalizedSlug) {
+      return;
+    }
+    const seen = seenByProvider.get(provider) ?? new Set<string>();
+    if (seen.has(normalizedSlug)) {
+      return;
+    }
+    seen.add(normalizedSlug);
+    seenByProvider.set(provider, seen);
+    byProvider[provider].push({ ...option, slug: normalizedSlug });
+  };
+
+  for (const status of input.providerStatuses) {
+    for (const model of status.availableModels ?? []) {
+      appendOption(status.provider, {
+        slug: model.slug,
+        name: model.name,
+        ...(typeof model.supportsReasoning === "boolean"
+          ? { supportsReasoning: model.supportsReasoning }
+          : {}),
+        ...(typeof model.supportsImageInput === "boolean"
+          ? { supportsImageInput: model.supportsImageInput }
+          : {}),
+        ...(typeof model.contextWindowTokens === "number"
+          ? { contextWindowTokens: model.contextWindowTokens }
+          : {}),
+      });
+    }
   }
-  if (options.size === 0) {
-    options.add(DEFAULT_MODEL_BY_PROVIDER[input.provider]);
+
+  appendOption(input.selectedProvider, {
+    slug: input.selectedModel,
+    name: input.selectedModel,
+  });
+
+  if (input.projectDefaultProvider && input.projectDefaultModel) {
+    appendOption(input.projectDefaultProvider, {
+      slug: input.projectDefaultModel,
+      name: input.projectDefaultModel,
+    });
   }
-  return [...options];
+
+  return byProvider;
 }
 function buildProviderOptionsForDispatch(input: {
   readonly provider: ProviderKind;
@@ -177,6 +226,7 @@ function buildProviderOptionsForDispatch(input: {
     readonly openRouterApiKey: string;
     readonly copilotBinaryPath: string;
     readonly opencodeBinaryPath: string;
+    readonly opencodePromptTimeoutMs: number;
     readonly kimiBinaryPath: string;
     readonly kimiApiKey: string;
   };
@@ -187,6 +237,7 @@ function buildProviderOptionsForDispatch(input: {
   const openRouterApiKey = input.settings.openRouterApiKey.trim();
   const copilotBinaryPath = input.settings.copilotBinaryPath.trim();
   const opencodeBinaryPath = input.settings.opencodeBinaryPath.trim();
+  const opencodePromptTimeoutMs = Math.round(input.settings.opencodePromptTimeoutMs);
   const kimiBinaryPath = input.settings.kimiBinaryPath.trim();
   const kimiApiKey = input.settings.kimiApiKey.trim();
 
@@ -211,11 +262,19 @@ function buildProviderOptionsForDispatch(input: {
           }
         : undefined;
     case "opencode":
-      return opencodeBinaryPath || openRouterApiKey
+      return (
+        opencodeBinaryPath ||
+        openRouterApiKey ||
+        (Number.isInteger(opencodePromptTimeoutMs) && opencodePromptTimeoutMs > 0)
+      )
         ? {
             opencode: {
               ...(opencodeBinaryPath ? { binaryPath: opencodeBinaryPath } : {}),
               ...(openRouterApiKey ? { openRouterApiKey } : {}),
+              ...(Number.isInteger(opencodePromptTimeoutMs) && opencodePromptTimeoutMs > 0
+                ? { promptTimeoutMs: opencodePromptTimeoutMs }
+                : {}),
+              useClientToolBridge: true,
             },
           }
         : undefined;
@@ -556,6 +615,85 @@ function commandStatusLabel(entry: WorkLogEntry): "Running" | "Done" | "Failed" 
 }
 function commandDropdownStateKey(entry: WorkLogEntry): string {
   return commandMergeKey(entry) ?? `entry:${entry.id}`;
+}
+const DRAFT_PROGRESS_QUERY_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bhow(?:\s+is|'s)\s+it\s+going\b/i,
+  /\bstatus(?:\s+update)?\b/i,
+  /\bprogress\b/i,
+  /\bwhat(?:'s|\s+is)\s+happening\b/i,
+  /\bwhat(?:'s|\s+is)\s+the\s+update\b/i,
+  /\bwhat\s+are\s+you\s+working\s+on\b/i,
+];
+function isDraftProgressStatusQuery(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return DRAFT_PROGRESS_QUERY_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+function buildDraftProgressStatusNotice(input: {
+  activeThread: Thread | null;
+  isThreadBusy: boolean;
+  timelineEntries: ReturnType<typeof deriveTimelineEntries>;
+  activeTerminalRuns: ReadonlyArray<DraftTerminalRunEntry>;
+  pendingApprovals: ReadonlyArray<PendingApproval>;
+  pendingUserInputs: ReadonlyArray<PendingUserInput>;
+}): string {
+  if (!input.activeThread) {
+    return "No active thread is selected right now.";
+  }
+  type DraftTimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
+  const latestWorkEntry = [...input.timelineEntries]
+    .reverse()
+    .find(
+      (entry): entry is Extract<DraftTimelineEntry, { kind: "work" }> => entry.kind === "work",
+    )?.entry;
+  const latestAssistantMessage = [...input.timelineEntries]
+    .reverse()
+    .find(
+      (
+        entry,
+      ): entry is Extract<DraftTimelineEntry, { kind: "message" }> =>
+        entry.kind === "message" && entry.message.role === "assistant",
+    )?.message;
+  const runningTerminalRuns = input.activeTerminalRuns.filter((run) => run.status === "running");
+  const parts: string[] = [];
+  parts.push(
+    input.isThreadBusy
+      ? "Run is still in progress."
+      : "No provider turn is running right now.",
+  );
+  if (latestWorkEntry) {
+    const commandOrLabel = latestWorkEntry.command?.trim() || latestWorkEntry.label.trim();
+    if (commandOrLabel.length > 0) {
+      parts.push(`Latest action: ${commandOrLabel}.`);
+    }
+  }
+  if (runningTerminalRuns.length > 0) {
+    const latestRun = runningTerminalRuns[runningTerminalRuns.length - 1];
+    if (latestRun) {
+      const latestCommand = latestRun.command.trim();
+      parts.push(
+        latestCommand.length > 0
+          ? `Running shell command: ${latestCommand}.`
+          : "A shell command is currently running.",
+      );
+    }
+  }
+  if (latestAssistantMessage?.streaming) {
+    parts.push("Assistant output is still streaming.");
+  }
+  if (input.pendingApprovals.length > 0) {
+    parts.push(
+      `${input.pendingApprovals.length} approval request${input.pendingApprovals.length === 1 ? "" : "s"} waiting.`,
+    );
+  }
+  if (input.pendingUserInputs.length > 0) {
+    parts.push(
+      `${input.pendingUserInputs.length} input request${input.pendingUserInputs.length === 1 ? "" : "s"} waiting.`,
+    );
+  }
+  return parts.join(" ");
 }
 interface DraftCommandEntryRowProps {
   workEntry: WorkLogEntry;
@@ -1701,6 +1839,15 @@ function DraftRouteView() {
     }
     return projects[0] ?? null;
   }, [activeThread, projects, selectedDraftThread]);
+  const openCodeStateQuery = useQuery(
+    serverOpenCodeStateQueryOptions({
+      ...(activeProject?.cwd ? { cwd: activeProject.cwd } : {}),
+      ...(settings.opencodeBinaryPath.trim().length > 0
+        ? { binaryPath: settings.opencodeBinaryPath.trim() }
+        : {}),
+      refreshModels: false,
+    }),
+  );
   const openInCwd = activeThread
     ? activeThread.worktreePath ?? activeProject?.cwd ?? null
     : selectedDraftThread?.worktreePath ?? activeProject?.cwd ?? null;
@@ -1743,32 +1890,187 @@ function DraftRouteView() {
       ? (promptStartsWithBang ? "command" : "task")
       : currentComposerMode;
   const canSend = prompt.trim().length > 0 && !sending;
-  const providerForFooter = forcedProvider ?? preferredProvider;
-  const modelForFooter = activeThread?.model
-    ? resolveModelSlugForProvider(providerForFooter, activeThread.model)
+  const defaultProviderForFooter = forcedProvider ?? preferredProvider;
+  const defaultModelForFooter = activeThread?.model
+    ? resolveModelSlugForProvider(defaultProviderForFooter, activeThread.model)
     : resolveModelSlugForProvider(
-        providerForFooter,
-        activeProject?.model ?? DEFAULT_MODEL_BY_PROVIDER[providerForFooter],
+        defaultProviderForFooter,
+        activeProject?.model ?? DEFAULT_MODEL_BY_PROVIDER[defaultProviderForFooter],
       );
+  const [selectedDraftProvider, setSelectedDraftProvider] =
+    useState<ProviderKind>(defaultProviderForFooter);
+  const [selectedDraftModel, setSelectedDraftModel] = useState(defaultModelForFooter);
+  useEffect(() => {
+    setSelectedDraftProvider(defaultProviderForFooter);
+    setSelectedDraftModel(defaultModelForFooter);
+  }, [activeThread?.id, defaultModelForFooter, defaultProviderForFooter]);
+  const providerForFooter = forcedProvider ?? selectedDraftProvider;
+  const selectedModelForFooter = resolveModelSlugForProvider(
+    providerForFooter,
+    selectedDraftModel || defaultModelForFooter,
+  );
+  const projectDefaultProvider = activeProject?.provider ?? null;
+  const projectDefaultModel = activeProject
+    ? (resolveModelSlugForProvider(
+        activeProject.provider,
+        activeProject.model ?? DEFAULT_MODEL_BY_PROVIDER[activeProject.provider],
+      ) as ModelSlug)
+    : null;
+  const selectedModelSelectionSource =
+    projectDefaultProvider &&
+    projectDefaultModel &&
+    providerForFooter === projectDefaultProvider &&
+    selectedModelForFooter === projectDefaultModel
+      ? "project-default"
+      : "manual";
+  const allModelOptionsByProvider = useMemo(
+    () =>
+      resolveDraftPickerModelOptionsByProvider({
+        providerStatuses: serverConfig?.providers ?? [],
+        selectedProvider: providerForFooter,
+        selectedModel: selectedModelForFooter,
+        projectDefaultProvider,
+        projectDefaultModel,
+      }),
+    [
+      projectDefaultModel,
+      projectDefaultProvider,
+      providerForFooter,
+      selectedModelForFooter,
+      serverConfig?.providers,
+    ],
+  );
+  const hiddenModelsByProvider = useMemo(
+    () => ({
+      codex: new Set(settings.hiddenCodexModels),
+      copilot: new Set(settings.hiddenCopilotModels),
+      opencode: new Set(settings.hiddenOpencodeModels),
+      kimi: new Set(settings.hiddenKimiModels),
+      pi: new Set(settings.hiddenPiModels),
+    }),
+    [
+      settings.hiddenCodexModels,
+      settings.hiddenCopilotModels,
+      settings.hiddenKimiModels,
+      settings.hiddenOpencodeModels,
+      settings.hiddenPiModels,
+    ],
+  );
+  const discoveredOpencodeModelOptions = useMemo(
+    () =>
+      openCodeStateQuery.data?.status === "available"
+        ? openCodeStateQuery.data.models.map((model) => ({
+            slug: model.slug,
+            name: `${model.providerId}/${model.modelId}`,
+            ...(typeof model.contextWindowTokens === "number"
+              ? { contextWindowTokens: model.contextWindowTokens }
+              : {}),
+          }))
+        : [],
+    [openCodeStateQuery.data],
+  );
+  const visibleDiscoveredOpencodeModelOptions = useMemo(
+    () =>
+      discoveredOpencodeModelOptions.filter(
+        (option) => !hiddenModelsByProvider.opencode.has(option.slug),
+      ),
+    [discoveredOpencodeModelOptions, hiddenModelsByProvider.opencode],
+  );
+  const visibleModelOptionsByProvider = useMemo(
+    () => ({
+      codex: allModelOptionsByProvider.codex.filter(
+        (option) => !hiddenModelsByProvider.codex.has(option.slug),
+      ),
+      copilot: allModelOptionsByProvider.copilot.filter(
+        (option) => !hiddenModelsByProvider.copilot.has(option.slug),
+      ),
+      opencode: allModelOptionsByProvider.opencode.filter(
+        (option) => !hiddenModelsByProvider.opencode.has(option.slug),
+      ),
+      kimi: allModelOptionsByProvider.kimi.filter(
+        (option) => !hiddenModelsByProvider.kimi.has(option.slug),
+      ),
+      pi: allModelOptionsByProvider.pi.filter((option) => !hiddenModelsByProvider.pi.has(option.slug)),
+    }),
+    [allModelOptionsByProvider, hiddenModelsByProvider],
+  );
+  const openRouterModelOptions = useMemo(
+    () =>
+      visibleModelOptionsByProvider.codex.filter((option) => isCodexOpenRouterModel(option.slug)),
+    [visibleModelOptionsByProvider.codex],
+  );
+  const openRouterContextLengthsBySlug = useMemo(
+    () =>
+      new Map(
+        openRouterModelOptions.map((option) => [option.slug, option.contextWindowTokens ?? null]),
+      ),
+    [openRouterModelOptions],
+  );
+  const opencodeContextLengthsBySlug = useMemo(
+    () =>
+      new Map(
+        [...visibleModelOptionsByProvider.opencode, ...visibleDiscoveredOpencodeModelOptions].map(
+          (option) => [option.slug, option.contextWindowTokens ?? null],
+        ),
+      ),
+    [visibleDiscoveredOpencodeModelOptions, visibleModelOptionsByProvider.opencode],
+  );
+  const selectedProviderPickerKind = useMemo(
+    () => getProviderPickerKindForSelection(providerForFooter, selectedModelForFooter),
+    [providerForFooter, selectedModelForFooter],
+  );
+  const hasHiddenPickerModels =
+    settings.hiddenCodexModels.length +
+      settings.hiddenCopilotModels.length +
+      settings.hiddenOpencodeModels.length +
+      settings.hiddenKimiModels.length +
+      settings.hiddenPiModels.length >
+    0;
+  const favoriteModelsByProvider = useMemo(
+    () => ({
+      codex: settings.favoriteCodexModels,
+      copilot: settings.favoriteCopilotModels,
+      opencode: settings.favoriteOpencodeModels,
+      kimi: settings.favoriteKimiModels,
+      pi: settings.favoritePiModels,
+    }),
+    [
+      settings.favoriteCodexModels,
+      settings.favoriteCopilotModels,
+      settings.favoriteKimiModels,
+      settings.favoriteOpencodeModels,
+      settings.favoritePiModels,
+    ],
+  );
+  const recentModelsByProvider = useMemo(
+    () => ({
+      codex: settings.recentCodexModels,
+      copilot: settings.recentCopilotModels,
+      opencode: settings.recentOpencodeModels,
+      kimi: settings.recentKimiModels,
+      pi: settings.recentPiModels,
+    }),
+    [
+      settings.recentCodexModels,
+      settings.recentCopilotModels,
+      settings.recentKimiModels,
+      settings.recentOpencodeModels,
+      settings.recentPiModels,
+    ],
+  );
   const contextState = describeContextWindowState({
     provider: providerForFooter,
-    model: modelForFooter,
+    model: selectedModelForFooter,
     tokenUsage: activeThread?.session?.tokenUsage,
-    ...getDocumentedContextWindowOverride({ provider: providerForFooter, model: modelForFooter }),
+    ...getDocumentedContextWindowOverride({
+      provider: providerForFooter,
+      model: selectedModelForFooter,
+    }),
   });
   const contextUsageLabel = formatDraftContextUsage({
     usedTokens: contextState.usedTokens,
     totalTokens: contextState.totalTokens,
   });
-  const draftModelOptions = useMemo(
-    () =>
-      resolveDraftModelOptions({
-        providerStatuses: serverConfig?.providers ?? [],
-        provider: providerForFooter,
-        currentModel: modelForFooter,
-      }),
-    [modelForFooter, providerForFooter, serverConfig?.providers],
-  );
   const latestPlanTurnId =
     activeThread?.latestTurn?.turnId ?? activeThread?.session?.activeTurnId ?? null;
   const activeProposedPlan = useMemo(
@@ -1793,11 +2095,6 @@ function DraftRouteView() {
     return activeProposedPlan ? `proposed:${activeProposedPlan.id}` : null;
   }, [activePlan?.turnId, activeProposedPlan]);
   const hasPlanSidebarContent = activePlan !== null || activeProposedPlan !== null;
-  const [selectedDraftModel, setSelectedDraftModel] = useState(modelForFooter);
-  const selectedModelForFooter = resolveModelSlugForProvider(
-    providerForFooter,
-    selectedDraftModel || modelForFooter,
-  );
   const codexAuthSourceIndicator = useMemo<{
     label: string;
     description: string;
@@ -1999,9 +2296,6 @@ function DraftRouteView() {
     setSuggestionActive(false);
     setHistoryIndexByThreadId((existing) => ({ ...existing, [activeThreadKey]: -1 }));
   }, [activeThreadKey]);
-  useEffect(() => {
-    setSelectedDraftModel(modelForFooter);
-  }, [modelForFooter, activeThread?.id, providerForFooter]);
   useLayoutEffect(() => {
     shouldAutoScrollRef.current = true;
     const frame = window.requestAnimationFrame(() => {
@@ -2021,12 +2315,19 @@ function DraftRouteView() {
     };
   }, [draftRenderables, scrollTimelineToBottom]);
 
-  const addNotice = useCallback((tone: RuntimeNotice["tone"], text: string) => {
-    setNotices((existing) => {
-      const next = [...existing, { id: randomUUID(), tone, text }];
-      return next.slice(-6);
-    });
-  }, []);
+  const addNotice = useCallback(
+    (
+      tone: RuntimeNotice["tone"],
+      text: string,
+      kind: RuntimeNotice["kind"] = "general",
+    ) => {
+      setNotices((existing) => {
+        const next = [...existing, { id: randomUUID(), tone, text, kind }];
+        return next.slice(-6);
+      });
+    },
+    [],
+  );
   const dismissNotice = useCallback((noticeId: string) => {
     setNotices((existing) => existing.filter((notice) => notice.id !== noticeId));
   }, []);
@@ -2233,7 +2534,7 @@ function DraftRouteView() {
       addNotice("error", "No project available. Add a project first.");
       return null;
     }
-    const provider = forcedProvider ?? preferredProvider;
+    const provider = forcedProvider ?? selectedDraftProvider ?? preferredProvider;
     const model = resolveModelSlugForProvider(
       provider,
       selectedDraftModel || targetProject.model?.trim(),
@@ -2283,16 +2584,24 @@ function DraftRouteView() {
     },
     [createLiveThread],
   );
-  const onSelectDraftModel = useCallback(
-    async (model: string) => {
-      setSelectedDraftModel(model);
+  const onSelectDraftProviderModel = useCallback(
+    async (providerPickerKind: AvailableProviderPickerKind, model: ModelSlug) => {
+      const backingProvider = getProviderPickerBackingProvider(providerPickerKind);
+      if (!backingProvider) {
+        return;
+      }
+      if (forcedProvider !== null && backingProvider !== forcedProvider) {
+        return;
+      }
+      const normalizedModel = resolveModelSlugForProvider(backingProvider, model);
+      setSelectedDraftProvider(backingProvider);
+      setSelectedDraftModel(normalizedModel);
       if (!activeThread) return;
       const api = readNativeApi();
       if (!api) {
         addNotice("error", "Native API unavailable. Could not update thread model.");
         return;
       }
-      const normalizedModel = resolveModelSlugForProvider(providerForFooter, model);
       try {
         await api.orchestration.dispatchCommand({
           type: "thread.meta.update",
@@ -2304,8 +2613,47 @@ function DraftRouteView() {
         addNotice("error", error instanceof Error ? error.message : "Failed to update model.");
       }
     },
-    [activeThread, addNotice, providerForFooter],
+    [activeThread, addNotice, forcedProvider],
   );
+  const onSetProjectDefaultFromPicker = useCallback(
+    async (providerPickerKind: AvailableProviderPickerKind, model: ModelSlug) => {
+      if (!activeProject) {
+        return;
+      }
+      const backingProvider = getProviderPickerBackingProvider(providerPickerKind);
+      if (!backingProvider) {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        addNotice("error", "Native API unavailable. Could not update project defaults.");
+        return;
+      }
+      const defaultModel = resolveModelSlugForProvider(backingProvider, model);
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "project.meta.update",
+          commandId: newCommandId(),
+          projectId: activeProject.id,
+          defaultProvider: backingProvider,
+          defaultModel,
+        });
+        addNotice("success", "Updated project default model for new tabs.");
+      } catch (error) {
+        addNotice(
+          "error",
+          error instanceof Error ? error.message : "Failed to update project default model.",
+        );
+      }
+    },
+    [activeProject, addNotice],
+  );
+  const onOpenSettingsFromDraftPicker = useCallback(() => {
+    void navigate({ to: "/settings" });
+  }, [navigate]);
+  const onOpenUsageFromDraftPicker = useCallback(() => {
+    addNotice("info", "Usage dashboard is available in the main chat view.");
+  }, [addNotice]);
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
       if (!activeThread) return;
@@ -2427,6 +2775,28 @@ function DraftRouteView() {
       resolvedIntentMode === "command" && !text.trimStart().startsWith("!") ? `! ${text}` : text;
     const nextModeForThread: DraftComposerMode =
       currentComposerMode === "auto" ? "auto" : currentComposerMode;
+    if (isThreadBusy && activeThread && isDraftProgressStatusQuery(textForDispatch)) {
+      const statusNotice = buildDraftProgressStatusNotice({
+        activeThread,
+        isThreadBusy,
+        timelineEntries,
+        activeTerminalRuns,
+        pendingApprovals,
+        pendingUserInputs,
+      });
+      setHistoryByThreadId((existing) => ({
+        ...existing,
+        [activeThread.id]: [...(existing[activeThread.id] ?? []), textForDispatch].slice(-30),
+      }));
+      setHistoryIndexByThreadId((existing) => ({ ...existing, [activeThread.id]: -1 }));
+      setPrompt("");
+      setSuggestionActive(false);
+      addNotice("info", statusNotice, "status-continuity");
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      scrollTimelineToBottom("smooth");
+      return;
+    }
 
     const api = readNativeApi();
     if (!api) {
@@ -2443,10 +2813,10 @@ function DraftRouteView() {
         activeThread !== null
           ? {
               threadId: activeThread.id,
-              provider: forcedProvider ?? preferredProvider,
+              provider: forcedProvider ?? selectedDraftProvider ?? preferredProvider,
               model: resolveModelSlugForProvider(
-                forcedProvider ?? preferredProvider,
-                activeThread.model,
+                forcedProvider ?? selectedDraftProvider ?? preferredProvider,
+                selectedDraftModel || activeThread.model,
               ),
               runtimeMode: activeThread.runtimeMode,
               interactionMode: activeThread.interactionMode,
@@ -2574,6 +2944,7 @@ function DraftRouteView() {
           openRouterApiKey: settings.openRouterApiKey,
           copilotBinaryPath: settings.copilotBinaryPath,
           opencodeBinaryPath: settings.opencodeBinaryPath,
+          opencodePromptTimeoutMs: settings.opencodePromptTimeoutMs,
           kimiBinaryPath: settings.kimiBinaryPath,
           kimiApiKey: settings.kimiApiKey,
         },
@@ -2599,6 +2970,7 @@ function DraftRouteView() {
         ...(providerOptionsForDispatch
           ? { providerOptions: providerOptionsForDispatch }
           : {}),
+        assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
         runtimeMode: target.runtimeMode,
         interactionMode: target.interactionMode,
         createdAt,
@@ -3021,7 +3393,14 @@ function DraftRouteView() {
                             : "border-border bg-muted/40 text-foreground"
                       }`}
                     >
-                      <span className="min-w-0 flex-1">{notice.text}</span>
+                      <span className="min-w-0 flex-1">
+                        {notice.kind === "status-continuity" ? (
+                          <span className="mr-1.5 inline-flex rounded-full border border-primary/35 bg-primary/12 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-primary">
+                            Status
+                          </span>
+                        ) : null}
+                        {notice.text}
+                      </span>
                       <Button
                         type="button"
                         size="icon-xs"
@@ -3211,27 +3590,33 @@ function DraftRouteView() {
                 <span className="rounded border border-border bg-muted/40 px-2 py-1">
                   terminals {terminalState.runningTerminalIds.length > 0 ? "active" : "idle"}
                 </span>
-                <Menu>
-                  <MenuTrigger
-                    render={
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        className="h-auto border-border bg-muted/40 px-2 py-1 text-[11px] text-foreground hover:bg-muted/60"
-                      >
-                        <span className="truncate">{selectedDraftModel}</span>
-                        <ChevronDownIcon className="size-3.5" />
-                      </Button>
-                    }
-                  />
-                  <MenuPopup align="end">
-                    {draftModelOptions.map((model) => (
-                      <MenuItem key={model} onClick={() => void onSelectDraftModel(model)}>
-                        {model}
-                      </MenuItem>
-                    ))}
-                  </MenuPopup>
-                </Menu>
+                <ProviderModelPicker
+                  activeThread={activeThread ?? null}
+                  compact
+                  language={settings.language}
+                  provider={providerForFooter}
+                  providerPickerKind={selectedProviderPickerKind}
+                  model={selectedModelForFooter as ModelSlug}
+                  lockedProvider={forcedProvider}
+                  allModelOptionsByProvider={allModelOptionsByProvider}
+                  visibleModelOptionsByProvider={visibleModelOptionsByProvider}
+                  openRouterModelOptions={openRouterModelOptions}
+                  opencodeModelOptions={visibleDiscoveredOpencodeModelOptions}
+                  openRouterContextLengthsBySlug={openRouterContextLengthsBySlug}
+                  opencodeContextLengthsBySlug={opencodeContextLengthsBySlug}
+                  serviceTierSetting={settings.codexServiceTier}
+                  hasHiddenModels={hasHiddenPickerModels}
+                  projectDefaultProvider={projectDefaultProvider}
+                  projectDefaultModel={projectDefaultModel}
+                  modelSelectionSource={selectedModelSelectionSource}
+                  favoriteModelsByProvider={favoriteModelsByProvider}
+                  recentModelsByProvider={recentModelsByProvider}
+                  onOpenProviderSetup={onOpenSettingsFromDraftPicker}
+                  onOpenManageModels={onOpenSettingsFromDraftPicker}
+                  onOpenUsageDashboard={onOpenUsageFromDraftPicker}
+                  onProviderModelChange={onSelectDraftProviderModel}
+                  onSetProjectDefaultModel={onSetProjectDefaultFromPicker}
+                />
               </div>
             </form>
           </footer>

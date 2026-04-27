@@ -301,6 +301,7 @@ function createSnapshotForTargetUser(options: {
         title: "Project",
         workspaceRoot: "/repo/project",
         defaultModel: "gpt-5.4",
+        defaultProvider: "codex",
         scripts: [],
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,

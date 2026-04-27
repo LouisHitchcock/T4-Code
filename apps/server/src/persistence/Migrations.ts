@@ -28,6 +28,7 @@ import Migration0013 from "./Migrations/013_ProjectionThreadProposedPlans.ts";
 import Migration0014 from "./Migrations/014_ProjectionThreadSessionTokenUsage.ts";
 import Migration0015 from "./Migrations/015_SanitizePersistedProviderOptions.ts";
 import Migration0016 from "./Migrations/016_ProjectionThreadSessionStartedAt.ts";
+import Migration0017 from "./Migrations/017_ProjectionProjectsDefaultProvider.ts";
 import { Effect } from "effect";
 
 /**
@@ -57,6 +58,7 @@ const loader = Migrator.fromRecord({
   "14_ProjectionThreadSessionTokenUsage": Migration0014,
   "15_SanitizePersistedProviderOptions": Migration0015,
   "16_ProjectionThreadSessionStartedAt": Migration0016,
+  "17_ProjectionProjectsDefaultProvider": Migration0017,
 });
 
 /**

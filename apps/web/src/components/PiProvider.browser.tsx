@@ -136,6 +136,9 @@ describe("Pi provider GUI", () => {
           providerPickerKind="pi"
           language="en"
           model="pi/default"
+          projectDefaultProvider={null}
+          projectDefaultModel={null}
+          modelSelectionSource="manual"
           lockedProvider={null}
           allModelOptionsByProvider={modelOptionsByProvider}
           visibleModelOptionsByProvider={modelOptionsByProvider}
@@ -151,6 +154,7 @@ describe("Pi provider GUI", () => {
           onOpenManageModels={() => undefined}
           onOpenUsageDashboard={() => undefined}
           onProviderModelChange={onProviderModelChange}
+          onSetProjectDefaultModel={() => undefined}
         />
       </QueryClientProvider>,
     );
@@ -231,6 +235,9 @@ describe("Pi provider GUI", () => {
           providerPickerKind="pi"
           language="en"
           model="pi/default"
+          projectDefaultProvider={null}
+          projectDefaultModel={null}
+          modelSelectionSource="manual"
           modelLabelOverride="2 authenticated models"
           lockedProvider={null}
           allModelOptionsByProvider={allModelOptionsByProvider}
@@ -247,6 +254,7 @@ describe("Pi provider GUI", () => {
           onOpenManageModels={() => undefined}
           onOpenUsageDashboard={() => undefined}
           onProviderModelChange={onProviderModelChange}
+          onSetProjectDefaultModel={() => undefined}
         />
       </QueryClientProvider>,
     );

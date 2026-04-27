@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   getProviderPickerBackingProvider,
+  getProviderPickerKindForSelection,
   type AvailableProviderPickerKind,
   type ProviderPickerKind,
   PROVIDER_OPTIONS,
@@ -29,6 +30,7 @@ import {
 import { serverCopilotUsageQueryOptions } from "../../lib/serverReactQuery";
 import { type AppServiceTier, shouldShowFastTierIcon } from "../../appSettings";
 import { getAppLanguageDetails, type AppLanguage } from "../../appLanguage";
+import { type ModelSelectionSource } from "../../modelSelectionSource";
 
 import {
   BarChart3Icon,
@@ -95,8 +97,18 @@ export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(
   (
     option,
   ): option is { value: AvailableProviderPickerKind; label: string; available: true } =>
-    isAvailableProviderOption(option) && option.value === "codex",
-);
+    isAvailableProviderOption(option),
+).toSorted((left, right) => {
+  const priorityByProvider: Record<AvailableProviderPickerKind, number> = {
+    codex: 0,
+    opencode: 1,
+    openrouter: 2,
+    copilot: 3,
+    kimi: 4,
+    pi: 5,
+  };
+  return priorityByProvider[left.value] - priorityByProvider[right.value];
+});
 export const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 export const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "gemini", label: "Gemini", icon: Gemini },
@@ -284,6 +296,14 @@ function getChatPickerCopy(language: AppLanguage) {
       connectProvider: "آماده سازی ارائه دهنده",
       hiddenModelsHint: "برخی مدل ها مخفی هستند. از مدیریت مدل ها برای بازیابی آنها استفاده کنید.",
       pickModelHint: "یک مدل انتخاب کنید تا فوراً این thread تغییر کند.",
+      projectDefaultPrefix: "پیش فرض پروژه",
+      setDefaultForNewTabs: "تنظیم به عنوان پیش فرض tab های جدید",
+      settingDefault: "در حال ذخیره پیش فرض...",
+      defaultMatchesCurrent: "انتخاب فعلی thread با پیش فرض پروژه یکسان است.",
+      sourcePrefix: "منبع انتخاب",
+      sourceProjectDefault: "پیش فرض پروژه",
+      sourceManual: "دستی",
+      sourceCoordinator: "هماهنگ کننده",
       models: (count: number) => `${count} مدل`,
       selected: "انتخاب شده",
       favorite: "محبوب",
@@ -303,6 +323,14 @@ function getChatPickerCopy(language: AppLanguage) {
     connectProvider: "Provider readiness",
     hiddenModelsHint: "Some models are hidden. Use Manage models to restore them.",
     pickModelHint: "Pick a model to switch this thread instantly.",
+    projectDefaultPrefix: "Project default",
+    setDefaultForNewTabs: "Set as default for new tabs",
+    settingDefault: "Saving default...",
+    defaultMatchesCurrent: "Current thread selection already matches the project default.",
+    sourcePrefix: "Selection source",
+    sourceProjectDefault: "Project default",
+    sourceManual: "Manual",
+    sourceCoordinator: "Coordinator",
     models: (count: number) => `${count} model${count === 1 ? "" : "s"}`,
     selected: "Selected",
     favorite: "Favorite",
@@ -446,6 +474,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   hasHiddenModels: boolean;
   favoriteModelsByProvider: Record<ProviderKind, ReadonlyArray<string>>;
   recentModelsByProvider: Record<ProviderKind, ReadonlyArray<string>>;
+  projectDefaultProvider: ProviderKind | null;
+  projectDefaultModel: ModelSlug | null;
+  modelSelectionSource: ModelSelectionSource;
   modelLabelOverride?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -453,11 +484,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onOpenManageModels: () => void;
   onOpenUsageDashboard: () => void;
   onProviderModelChange: (provider: AvailableProviderPickerKind, model: ModelSlug) => void;
+  onSetProjectDefaultModel: (
+    provider: AvailableProviderPickerKind,
+    model: ModelSlug,
+  ) => Promise<void> | void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isSettingProjectDefault, setIsSettingProjectDefault] = useState(false);
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const { disabled, onProviderModelChange } = props;
+  const { disabled, onProviderModelChange, onSetProjectDefaultModel } = props;
   const copilotUsageQuery = useQuery(serverCopilotUsageQueryOptions(isOpen));
   const copy = getChatPickerCopy(props.language);
 
@@ -484,6 +520,56 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     AVAILABLE_PROVIDER_OPTIONS.find((option) => option.value === props.providerPickerKind)?.label ??
     props.providerPickerKind;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.providerPickerKind];
+  const projectDefaultSelection = useMemo(() => {
+    if (!props.projectDefaultProvider || !props.projectDefaultModel) {
+      return null;
+    }
+
+    const providerPickerKind = getProviderPickerKindForSelection(
+      props.projectDefaultProvider,
+      props.projectDefaultModel,
+    );
+    return {
+      providerPickerKind,
+      model: props.projectDefaultModel,
+    };
+  }, [props.projectDefaultModel, props.projectDefaultProvider]);
+  const projectDefaultProviderLabel = projectDefaultSelection
+    ? (AVAILABLE_PROVIDER_OPTIONS.find(
+        (option) => option.value === projectDefaultSelection.providerPickerKind,
+      )?.label ?? projectDefaultSelection.providerPickerKind)
+    : null;
+  const projectDefaultModelLabel = useMemo(() => {
+    if (!projectDefaultSelection) {
+      return null;
+    }
+
+    const options = getModelOptionsForProviderPicker(
+      projectDefaultSelection.providerPickerKind,
+      props.visibleModelOptionsByProvider,
+      props.openRouterModelOptions,
+      props.opencodeModelOptions,
+    );
+    return (
+      options.find((option) => option.slug === projectDefaultSelection.model)?.name ??
+      getModelDisplayName(projectDefaultSelection.model, props.projectDefaultProvider ?? "codex")
+    );
+  }, [
+    projectDefaultSelection,
+    props.openRouterModelOptions,
+    props.opencodeModelOptions,
+    props.projectDefaultProvider,
+    props.visibleModelOptionsByProvider,
+  ]);
+  const currentSelectionMatchesProjectDefault =
+    projectDefaultSelection?.providerPickerKind === props.providerPickerKind &&
+    projectDefaultSelection.model === props.model;
+  const selectionSourceLabel =
+    props.modelSelectionSource === "project-default"
+      ? copy.sourceProjectDefault
+      : props.modelSelectionSource === "coordinator"
+        ? copy.sourceCoordinator
+        : copy.sourceManual;
 
   // Reset search on close
   useEffect(() => {
@@ -572,6 +658,30 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   // Total model count across visible sections
   const totalVisibleModels = providerSections.reduce((sum, s) => sum + s.modelOptions.length, 0);
+  const handleSetCurrentAsProjectDefault = useCallback(() => {
+    if (disabled || currentSelectionMatchesProjectDefault || isSettingProjectDefault) {
+      return;
+    }
+
+    const maybePromise = onSetProjectDefaultModel(props.providerPickerKind, props.model);
+    if (!maybePromise || typeof (maybePromise as Promise<void>).then !== "function") {
+      setIsOpen(false);
+      return;
+    }
+
+    setIsSettingProjectDefault(true);
+    void (maybePromise as Promise<void>).finally(() => {
+      setIsSettingProjectDefault(false);
+      setIsOpen(false);
+    });
+  }, [
+    currentSelectionMatchesProjectDefault,
+    disabled,
+    isSettingProjectDefault,
+    onSetProjectDefaultModel,
+    props.model,
+    props.providerPickerKind,
+  ]);
 
   return (
     <Popover
@@ -847,10 +957,31 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
           {/* Footer toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 bg-muted/15 px-3 py-2">
-            <p className="text-[11px] text-muted-foreground/65 leading-relaxed">
-              {props.hasHiddenModels ? copy.hiddenModelsHint : copy.pickModelHint}
-            </p>
+            <div className="min-w-0 space-y-1">
+              <p className="text-[11px] text-muted-foreground/65 leading-relaxed">
+                {props.hasHiddenModels ? copy.hiddenModelsHint : copy.pickModelHint}
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground/65 leading-relaxed">
+                {copy.projectDefaultPrefix}:{" "}
+                {projectDefaultProviderLabel && projectDefaultModelLabel
+                  ? `${projectDefaultProviderLabel} · ${projectDefaultModelLabel}`
+                  : "—"}
+              </p>
+              <p className="text-[11px] text-muted-foreground/65 leading-relaxed">
+                {copy.sourcePrefix}: {selectionSourceLabel}
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={disabled || currentSelectionMatchesProjectDefault || isSettingProjectDefault}
+                title={currentSelectionMatchesProjectDefault ? copy.defaultMatchesCurrent : undefined}
+                onClick={handleSetCurrentAsProjectDefault}
+              >
+                <CheckIcon className="size-3.5" />
+                {isSettingProjectDefault ? copy.settingDefault : copy.setDefaultForNewTabs}
+              </Button>
               <Button
                 size="xs"
                 variant="outline"

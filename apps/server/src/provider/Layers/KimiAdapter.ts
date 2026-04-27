@@ -116,6 +116,9 @@ export const makeKimiAdapterLive = (options?: KimiAdapterLiveOptions) =>
         provider: PROVIDER,
         capabilities: {
           sessionModelSwitch: "restart-session",
+        structuredUserInput: "unsupported",
+        readThread: "unsupported",
+        rollbackThread: "unsupported",
         },
         startSession,
         sendTurn,

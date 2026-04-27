@@ -26,6 +26,7 @@ import { Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } fro
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import type { ProviderAdapterCapabilities } from "../Services/ProviderAdapter.ts";
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
@@ -91,6 +92,14 @@ function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "st
     default:
       return "running";
   }
+}
+
+function supportsStructuredUserInput(capabilities: ProviderAdapterCapabilities): boolean {
+  return capabilities.structuredUserInput !== "unsupported";
+}
+
+function supportsRollbackThread(capabilities: ProviderAdapterCapabilities): boolean {
+  return capabilities.rollbackThread !== "unsupported";
 }
 
 function toRuntimePayloadFromSession(
@@ -456,6 +465,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           operation: "ProviderService.respondToUserInput",
           allowRecovery: true,
         });
+        if (!supportsStructuredUserInput(routed.adapter.capabilities)) {
+          return yield* toValidationError(
+            "ProviderService.respondToUserInput",
+            `Provider '${routed.adapter.provider}' does not support structured user-input responses.`,
+          );
+        }
         yield* routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers);
       });
 
@@ -532,6 +547,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           operation: "ProviderService.rollbackConversation",
           allowRecovery: true,
         });
+        if (!supportsRollbackThread(routed.adapter.capabilities)) {
+          return yield* toValidationError(
+            "ProviderService.rollbackConversation",
+            `Provider '${routed.adapter.provider}' does not support rollback for this integration.`,
+          );
+        }
         yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
         yield* analytics.record("provider.conversation.rolled_back", {
           provider: routed.adapter.provider,

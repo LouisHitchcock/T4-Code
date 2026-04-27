@@ -6,6 +6,7 @@ import {
   OrchestrationThread,
 } from "@draft/contracts";
 import { Effect, Schema } from "effect";
+import { inferProviderFromModelSlug } from "@draft/shared/model";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
@@ -183,6 +184,11 @@ export function projectEvent(
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             defaultModel: payload.defaultModel,
+            defaultProvider:
+              payload.defaultProvider ??
+              (payload.defaultModel !== null
+                ? inferProviderFromModelSlug(payload.defaultModel)
+                : null),
             scripts: payload.scripts,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -215,6 +221,16 @@ export function projectEvent(
                   ...(payload.defaultModel !== undefined
                     ? { defaultModel: payload.defaultModel }
                     : {}),
+                  ...(payload.defaultProvider !== undefined
+                    ? { defaultProvider: payload.defaultProvider }
+                    : payload.defaultModel !== undefined
+                      ? {
+                          defaultProvider:
+                            payload.defaultModel !== null
+                              ? inferProviderFromModelSlug(payload.defaultModel)
+                              : null,
+                        }
+                      : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   updatedAt: payload.updatedAt,
                 }
@@ -411,6 +427,12 @@ export function projectEvent(
           event.type,
           "session",
         );
+        if (
+          thread.session !== null &&
+          thread.session.updatedAt.localeCompare(session.updatedAt) > 0
+        ) {
+          return nextBase;
+        }
 
         return {
           ...nextBase,

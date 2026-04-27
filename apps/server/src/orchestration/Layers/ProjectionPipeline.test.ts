@@ -1712,6 +1712,148 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
   );
 
   it.effect(
+    "ignores stale thread.session-set updates with older session.updatedAt values",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+        const createdAt = "2026-02-26T14:00:00.000Z";
+        const latestSessionAt = "2026-02-26T14:00:10.000Z";
+        const staleSessionAt = "2026-02-26T14:00:01.000Z";
+
+        yield* appendAndProject({
+          type: "project.created",
+          eventId: EventId.makeUnsafe("evt-stale-session-1"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.makeUnsafe("project-stale-session"),
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe("cmd-stale-session-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-stale-session-1"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.makeUnsafe("project-stale-session"),
+            title: "Stale Session Project",
+            workspaceRoot: "/repo/project",
+            defaultModel: "gpt-5.4",
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.makeUnsafe("evt-stale-session-2"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-stale-session"),
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe("cmd-stale-session-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-stale-session-2"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-stale-session"),
+            projectId: ProjectId.makeUnsafe("project-stale-session"),
+            title: "Stale Session Thread",
+            model: "gpt-5.4",
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.session-set",
+          eventId: EventId.makeUnsafe("evt-stale-session-3"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-stale-session"),
+          occurredAt: latestSessionAt,
+          commandId: CommandId.makeUnsafe("cmd-stale-session-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-stale-session-3"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-stale-session"),
+            session: {
+              threadId: ThreadId.makeUnsafe("thread-stale-session"),
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              startedAt: createdAt,
+              updatedAt: latestSessionAt,
+            },
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.session-set",
+          eventId: EventId.makeUnsafe("evt-stale-session-4"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-stale-session"),
+          occurredAt: latestSessionAt,
+          commandId: CommandId.makeUnsafe("cmd-stale-session-4"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-stale-session-4"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-stale-session"),
+            session: {
+              threadId: ThreadId.makeUnsafe("thread-stale-session"),
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.makeUnsafe("turn-stale-session"),
+              lastError: null,
+              startedAt: createdAt,
+              updatedAt: staleSessionAt,
+            },
+          },
+        });
+
+        const sessionRows = yield* sql<{
+          readonly status: string;
+          readonly activeTurnId: string | null;
+          readonly updatedAt: string;
+        }>`
+          SELECT
+            status,
+            active_turn_id AS "activeTurnId",
+            updated_at AS "updatedAt"
+          FROM projection_thread_sessions
+          WHERE thread_id = 'thread-stale-session'
+        `;
+        assert.deepEqual(sessionRows, [
+          {
+            status: "ready",
+            activeTurnId: null,
+            updatedAt: latestSessionAt,
+          },
+        ]);
+
+        const turnRows = yield* sql<{
+          readonly turnId: string;
+        }>`
+          SELECT
+            turn_id AS "turnId"
+          FROM projection_turns
+          WHERE thread_id = 'thread-stale-session'
+            AND turn_id = 'turn-stale-session'
+        `;
+        assert.deepEqual(turnRows, []);
+      }),
+  );
+
+  it.effect(
     "marks the active projected turn interrupted even when the interrupt event omits turnId",
     () =>
       Effect.gen(function* () {

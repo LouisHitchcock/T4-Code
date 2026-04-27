@@ -133,6 +133,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         title: "Project",
         workspaceRoot: "/repo/project",
         defaultModel: "gpt-5",
+        defaultProvider: "codex",
         scripts: [],
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,

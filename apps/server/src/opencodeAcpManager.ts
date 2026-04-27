@@ -1,7 +1,10 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import * as acp from "@agentclientprotocol/sdk";
 import {
@@ -43,9 +46,75 @@ interface PendingApprovalRequest {
   readonly resolve: (response: acp.RequestPermissionResponse) => void;
 }
 
+export function isOpenCodeClientToolBridgeEnabled(
+  providerOptions: ProviderSessionStartInput["providerOptions"] | undefined,
+): boolean {
+  return providerOptions?.opencode?.useClientToolBridge === true;
+}
+
+export function buildOpenCodeClientCapabilities(input: {
+  readonly useClientToolBridge: boolean;
+}): acp.ClientCapabilities {
+  return input.useClientToolBridge ? OPENCODE_CLIENT_TOOL_BRIDGE_CAPABILITIES : {};
+}
+
+class TimeoutError extends Error {
+  readonly label: string;
+  readonly timeoutMs: number;
+
+  constructor(input: { readonly label: string; readonly timeoutMs: number }) {
+    super(`${input.label} timed out after ${input.timeoutMs}ms.`);
+    this.name = "TimeoutError";
+    this.label = input.label;
+    this.timeoutMs = input.timeoutMs;
+  }
+}
+
+function isTimeoutError(error: unknown): error is TimeoutError {
+  return error instanceof TimeoutError;
+}
+
+type OpenCodePromptPhase = "primary" | "retry";
+
+class OpenCodePromptTimeoutError extends Error {
+  readonly timeoutMs: number;
+  readonly phase: OpenCodePromptPhase;
+
+  constructor(input: {
+    readonly message: string;
+    readonly timeoutMs: number;
+    readonly phase: OpenCodePromptPhase;
+    readonly cause: unknown;
+  }) {
+    super(input.message, { cause: input.cause });
+    this.name = "OpenCodePromptTimeoutError";
+    this.timeoutMs = input.timeoutMs;
+    this.phase = input.phase;
+  }
+}
+
+function isOpenCodePromptTimeoutError(error: unknown): error is OpenCodePromptTimeoutError {
+  return error instanceof OpenCodePromptTimeoutError;
+}
+
 interface ToolSnapshot {
   readonly kind: acp.ToolKind | null;
   readonly title: string;
+}
+type OpenCodeToolInvocationFailureKind = "schema" | "unavailable";
+
+interface OpenCodeToolSchemaFailure {
+  readonly kind: OpenCodeToolInvocationFailureKind;
+  readonly message: string;
+}
+interface OpenCodeBridgeTerminalState {
+  readonly terminalId: string;
+  readonly child: ChildProcessWithoutNullStreams;
+  output: string;
+  truncated: boolean;
+  exitStatus: acp.TerminalExitStatus | undefined;
+  readonly waitForExit: Promise<acp.TerminalExitStatus>;
+  readonly resolveWaitForExit: (status: acp.TerminalExitStatus) => void;
 }
 
 interface OpenCodeSessionContext {
@@ -54,12 +123,17 @@ interface OpenCodeSessionContext {
   connection: acp.ClientSideConnection;
   acpSessionId: string;
   models: acp.SessionModelState | null;
+  promptTimeoutMs: number;
   pendingApprovals: Map<ApprovalRequestId, PendingApprovalRequest>;
   toolSnapshots: Map<string, ToolSnapshot>;
   currentTurnId: TurnId | undefined;
   turnInFlight: boolean;
   stopping: boolean;
+  bridgeEnabled: boolean;
+  bridgeTerminals: Map<string, OpenCodeBridgeTerminalState>;
+  nextBridgeTerminalOrdinal: number;
   lastStderrLine?: string;
+  lastToolSchemaFailure: OpenCodeToolSchemaFailure | undefined;
 }
 
 export interface OpenCodeAppServerStartSessionInput {
@@ -88,7 +162,39 @@ export interface OpenCodeAcpManagerEvents {
 
 const OPENCODE_ACP_INITIALIZE_TIMEOUT_MS = 10_000;
 const OPENCODE_ACP_SESSION_START_TIMEOUT_MS = 10_000;
+const OPENCODE_DEFAULT_PROMPT_TIMEOUT_MS = 300_000;
+const OPENCODE_MIN_PROMPT_TIMEOUT_MS = 1;
+const OPENCODE_MAX_PROMPT_TIMEOUT_MS = 900_000;
 const OPENROUTER_ENV_KEY = "OPENROUTER_API_KEY";
+const OPENCODE_TOOL_SCHEMA_ERROR_PATTERN = /(?:invalid arguments|schemaerror|missing key)/i;
+const OPENCODE_TOOL_SCHEMA_CONTEXT_PATTERN = /(?:\btool\b|\btask\b|\btodolist\b|\btodo\b)/i;
+const OPENCODE_UNAVAILABLE_TOOL_ERROR_PATTERN =
+  /(?:\bskill\b.*\bnot found\b|available skills:\s*none|unavailable tool|model tried to call unavailable tool|unknown tool)/i;
+const OPENCODE_UNAVAILABLE_TOOL_CONTEXT_PATTERN = /(?:\btool\b|\bskill\b|\bavailable skills\b)/i;
+const OPENCODE_ENV_OVERRIDE_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+const OPENCODE_BRIDGE_MAX_TERMINAL_OUTPUT_CHARS = 200_000;
+const OPENCODE_CLIENT_TOOL_BRIDGE_CAPABILITIES = {
+  fs: {
+    readTextFile: true,
+    writeTextFile: true,
+  },
+  terminal: true,
+} satisfies acp.ClientCapabilities;
+const OPENCODE_TOOL_ALIAS_GUIDANCE_LINES = [
+  "Translate Draft/Warp tool aliases to OpenCode built-ins before retrying:",
+  "- read_files -> read",
+  "- file_glob -> glob (or list for directory listings)",
+  "- grep / ripgrep -> grep",
+  "- run_shell_command / terminal.exec -> bash",
+  "- ask_user_question -> question",
+  "- create_todo_list / add_todos / mark_todo_as_done / remove_todos -> todowrite",
+  "- read_todos -> todoread",
+  "- read_skill -> skill only when skills are available",
+  "- for write/edit payloads, prefer filePath when required by schema (write {\"filePath\":\"notes.txt\",\"content\":\"hello\"}, edit {\"filePath\":\"src/main.cpp\",\"oldString\":\"foo\",\"newString\":\"bar\"})",
+  "- if the model emits XML-style tool syntax (for example <function=bash> <parameter=command>...</parameter>), translate it to a real tool call like bash({\"command\":\"...\"}) and never echo XML to the user",
+] as const;
+const OPENCODE_BUILTIN_ALLOWLIST_LINE =
+  "Use only these OpenCode built-ins: bash, read, write, edit, glob, list, grep, apply_patch, webfetch, websearch, todoread, todowrite, task, question, skill.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -120,8 +226,26 @@ export function isOpenCodeModelAvailable(
   return availableModelIds.length === 0 || availableModelIds.includes(model);
 }
 
+function buildOpenCodeUnavailableModelMessage(input: {
+  readonly model: string;
+  readonly availableModelIds: ReadonlyArray<string>;
+}): string {
+  return `OpenCode does not expose the requested model '${input.model}' for this session. Available models: ${input.availableModelIds.join(", ")}. Select one of the available models or refresh your OpenCode/Ollama model configuration.`;
+}
+
 export function buildOpenCodeCliArgs(input: { readonly cwd: string }): ReadonlyArray<string> {
   return ["acp", "--cwd", input.cwd];
+}
+
+function normalizeOpenCodePromptTimeoutMs(value: number | undefined): number {
+  const normalizedValue =
+    typeof value === "number" && Number.isInteger(value)
+      ? value
+      : OPENCODE_DEFAULT_PROMPT_TIMEOUT_MS;
+  return Math.min(
+    OPENCODE_MAX_PROMPT_TIMEOUT_MS,
+    Math.max(OPENCODE_MIN_PROMPT_TIMEOUT_MS, normalizedValue),
+  );
 }
 
 function parseOpenCodeConfigContent(raw: string | undefined): Record<string, unknown> {
@@ -177,6 +301,8 @@ function mergeOpenCodeConfig(
 export function buildOpenCodeCliEnv(input: {
   readonly runtimeMode: ProviderSession["runtimeMode"];
   readonly openRouterApiKey?: string;
+  readonly configContent?: string;
+  readonly envOverrides?: Record<string, string>;
   readonly baseEnv?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   const env = { ...(input.baseEnv ?? process.env) };
@@ -184,14 +310,32 @@ export function buildOpenCodeCliEnv(input: {
   if (openRouterApiKey) {
     env[OPENROUTER_ENV_KEY] = openRouterApiKey;
   }
+  const envOverrides = Object.fromEntries(
+    Object.entries(input.envOverrides ?? {})
+      .map(([rawKey, rawValue]) => [rawKey.trim().toUpperCase(), rawValue.trim()] as const)
+      .filter(
+        ([key, value]) =>
+          key.length > 0 &&
+          key.length <= 128 &&
+          value.length > 0 &&
+          value.length <= 4_096 &&
+          OPENCODE_ENV_OVERRIDE_KEY_PATTERN.test(key),
+      )
+      .slice(0, 64),
+  );
+  for (const [key, value] of Object.entries(envOverrides)) {
+    env[key] = value;
+  }
+
+  const overrideConfig = parseOpenCodeConfigContent(input.configContent);
 
   const runtimeConfig = buildOpenCodeRuntimeConfig(input.runtimeMode);
-  if (Object.keys(runtimeConfig).length === 0) {
+  if (Object.keys(runtimeConfig).length === 0 && Object.keys(overrideConfig).length === 0) {
     return env;
   }
 
   const mergedConfig = mergeOpenCodeConfig(
-    parseOpenCodeConfigContent(env.OPENCODE_CONFIG_CONTENT),
+    mergeOpenCodeConfig(parseOpenCodeConfigContent(env.OPENCODE_CONFIG_CONTENT), overrideConfig),
     runtimeConfig,
   );
   env.OPENCODE_CONFIG_CONTENT = JSON.stringify(mergedConfig);
@@ -214,6 +358,140 @@ export function normalizeOpenCodeStartErrorMessage(rawMessage: string): string {
   return rawMessage;
 }
 
+export function classifyOpenCodeToolInvocationFailure(
+  rawMessage: string,
+): OpenCodeToolInvocationFailureKind | null {
+  const message = rawMessage.trim();
+  if (message.length === 0) {
+    return null;
+  }
+  if (
+    OPENCODE_TOOL_SCHEMA_ERROR_PATTERN.test(message) &&
+    OPENCODE_TOOL_SCHEMA_CONTEXT_PATTERN.test(message)
+  ) {
+    return "schema";
+  }
+  if (
+    OPENCODE_UNAVAILABLE_TOOL_ERROR_PATTERN.test(message) &&
+    OPENCODE_UNAVAILABLE_TOOL_CONTEXT_PATTERN.test(message)
+  ) {
+    return "unavailable";
+  }
+  return null;
+}
+export function shouldRetryOpenCodeToolSchemaFailure(rawMessage: string): boolean {
+  return classifyOpenCodeToolInvocationFailure(rawMessage) === "schema";
+}
+export function shouldRetryOpenCodeToolInvocationFailure(rawMessage: string): boolean {
+  return classifyOpenCodeToolInvocationFailure(rawMessage) !== null;
+}
+export function buildOpenCodeToolSchemaRecoveryPrompt(input: {
+  readonly rawMessage: string;
+  readonly originalUserRequest?: string;
+}): string | undefined {
+  const message = input.rawMessage.trim();
+  const failureKind = classifyOpenCodeToolInvocationFailure(message);
+  if (!failureKind) {
+    return undefined;
+  }
+  const normalizedError = message.replace(/\s+/g, " ").slice(0, 320);
+  const normalizedUserRequest = input.originalUserRequest?.trim();
+  return [
+    "Continue the exact same in-progress user request.",
+    `The previous tool call failed: ${normalizedError}`,
+    "Retry immediately with corrected tool calls; do not stop to apologize.",
+    ...(normalizedUserRequest && normalizedUserRequest.length > 0
+      ? [
+          "Original user request (do not replace it with tool-description examples):",
+          "<original_user_request>",
+          normalizedUserRequest.slice(0, 4_000),
+          "</original_user_request>",
+        ]
+      : []),
+    `Detected tool failure kind: ${failureKind}.`,
+    "Do not substitute tool-description examples (for example dark mode or React optimization templates) in place of the actual user request.",
+    "Do not call `skill` unless the requested skill exists; if available skills are none, continue without `skill`.",
+    "Do not call unavailable tool names; use only tools exposed in this session.",
+    ...OPENCODE_TOOL_ALIAS_GUIDANCE_LINES,
+    OPENCODE_BUILTIN_ALLOWLIST_LINE,
+    "For todo tracking in OpenCode, use only: todowrite.",
+    "todowrite requires input like {\"todos\":[{\"content\":\"...\",\"status\":\"pending|in_progress|completed|cancelled\",\"priority\":\"high|medium|low\"}]}.",
+    "Use task only for subagent delegation; task requires description, prompt, and subagent_type (optional task_id).",
+    "Do not invent todo tool aliases such as create_todo_list, add_todos, read_todos, mark_todo_as_done, remove_todos, or todolist.",
+    "Do not print raw tool-call JSON in assistant text; invoke tools directly.",
+  ].join("\n");
+}
+
+function stringifyOpenCodeToolContent(content: unknown): string | undefined {
+  try {
+    const serialized = JSON.stringify(content);
+    return typeof serialized === "string" && serialized.length > 0 ? serialized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readOpenCodeBridgeString(
+  params: Record<string, unknown>,
+  keys: ReadonlyArray<string>,
+): string | undefined {
+  for (const key of keys) {
+    const value = params[key];
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function readOpenCodeBridgeSessionId(params: Record<string, unknown>): string | undefined {
+  return typeof params.sessionId === "string" ? params.sessionId : undefined;
+}
+
+function resolveOpenCodeBridgePath(input: {
+  readonly rawPath: string;
+  readonly fallbackCwd: string;
+}): string {
+  const trimmed = input.rawPath.trim();
+  if (trimmed.length === 0) {
+    throw new Error("OpenCode ACP client bridge requires a non-empty path.");
+  }
+  if (trimmed.startsWith("file://")) {
+    return fileURLToPath(trimmed);
+  }
+  return isAbsolute(trimmed) ? trimmed : resolve(input.fallbackCwd, trimmed);
+}
+
+function toOpenCodeTerminalExitStatus(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): acp.TerminalExitStatus {
+  if (signal) {
+    return { signal };
+  }
+  return { exitCode: code ?? 1 };
+}
+
+function appendOpenCodeTerminalOutput(
+  terminal: OpenCodeBridgeTerminalState,
+  chunk: string,
+): void {
+  if (chunk.length === 0) {
+    return;
+  }
+  terminal.output = `${terminal.output}${chunk}`;
+  if (terminal.output.length > OPENCODE_BRIDGE_MAX_TERMINAL_OUTPUT_CHARS) {
+    terminal.truncated = true;
+    terminal.output = terminal.output.slice(
+      terminal.output.length - OPENCODE_BRIDGE_MAX_TERMINAL_OUTPUT_CHARS,
+    );
+  }
+}
+
 function withTimeout<T>(input: {
   readonly label: string;
   readonly timeoutMs: number;
@@ -221,7 +499,12 @@ function withTimeout<T>(input: {
 }): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`${input.label} timed out after ${input.timeoutMs}ms.`));
+      reject(
+        new TimeoutError({
+          label: input.label,
+          timeoutMs: input.timeoutMs,
+        }),
+      );
     }, input.timeoutMs);
 
     input.promise.then(
@@ -252,6 +535,277 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
     };
+  }
+
+  private consumeOpenCodeToolSchemaFailure(
+    context: OpenCodeSessionContext,
+  ): OpenCodeToolSchemaFailure | undefined {
+    const failure = context.lastToolSchemaFailure;
+    context.lastToolSchemaFailure = undefined;
+    return failure;
+  }
+
+  private emitOpenCodeToolRetryWarning(
+    context: OpenCodeSessionContext,
+    turnId: TurnId,
+    failureKind: OpenCodeToolInvocationFailureKind,
+    error: string,
+  ) {
+    const kindLabel =
+      failureKind === "schema" ? "schema validation" : "unavailable tool selection";
+    this.emitRuntimeEvent({
+      ...this.createEventBase(context),
+      turnId,
+      type: "runtime.warning",
+      payload: {
+        message: `OpenCode tool call failed (${kindLabel}). Retrying automatically with corrected tool guidance.`,
+        detail: { error, failureKind },
+      },
+    });
+  }
+
+  private emitOpenCodeRetrySuppressedWarning(
+    context: OpenCodeSessionContext,
+    turnId: TurnId,
+    failureKind: OpenCodeToolInvocationFailureKind,
+    error: string,
+  ) {
+    this.emitRuntimeEvent({
+      ...this.createEventBase(context),
+      turnId,
+      type: "runtime.warning",
+      payload: {
+        message:
+          "OpenCode repeated an unavailable tool failure after an automatic retry; no further retries will run for this turn.",
+        detail: { error, failureKind },
+      },
+    });
+  }
+
+  private ensureOpenCodeBridgeSession(
+    context: OpenCodeSessionContext,
+    params: Record<string, unknown>,
+  ): void {
+    const sessionId = readOpenCodeBridgeSessionId(params);
+    if (sessionId && sessionId !== context.acpSessionId) {
+      throw new Error(
+        `OpenCode ACP client bridge request targeted unknown session '${sessionId}'.`,
+      );
+    }
+  }
+
+  private getOpenCodeBridgeTerminalOrThrow(
+    context: OpenCodeSessionContext,
+    terminalId: string,
+  ): OpenCodeBridgeTerminalState {
+    const terminal = context.bridgeTerminals.get(terminalId);
+    if (!terminal) {
+      throw new Error(`OpenCode ACP client bridge terminal '${terminalId}' was not found.`);
+    }
+    return terminal;
+  }
+
+  private resolveOpenCodeBridgeTerminalExit(
+    terminal: OpenCodeBridgeTerminalState,
+    status: acp.TerminalExitStatus,
+  ): void {
+    if (terminal.exitStatus) {
+      return;
+    }
+    terminal.exitStatus = status;
+    terminal.resolveWaitForExit(status);
+  }
+
+  private disposeOpenCodeBridgeTerminals(context: OpenCodeSessionContext): void {
+    for (const terminal of context.bridgeTerminals.values()) {
+      if (!terminal.exitStatus) {
+        this.resolveOpenCodeBridgeTerminalExit(terminal, {
+          signal: "SIGTERM",
+        });
+        killChildTree(terminal.child);
+      }
+    }
+    context.bridgeTerminals.clear();
+  }
+
+  private async openCodeBridgeReadTextFile(
+    context: OpenCodeSessionContext,
+    params: acp.ReadTextFileRequest,
+  ): Promise<acp.ReadTextFileResponse> {
+    const request = params as acp.ReadTextFileRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const rawPath = readOpenCodeBridgeString(request, ["path", "uri"]);
+    if (!rawPath) {
+      throw new Error("OpenCode ACP client bridge readTextFile requires a path.");
+    }
+    const fallbackCwd = context.session.cwd ?? process.cwd();
+    const resolvedPath = resolveOpenCodeBridgePath({
+      rawPath,
+      fallbackCwd,
+    });
+    const content = await readFile(resolvedPath, "utf8");
+    return { content };
+  }
+
+  private async openCodeBridgeWriteTextFile(
+    context: OpenCodeSessionContext,
+    params: acp.WriteTextFileRequest,
+  ): Promise<acp.WriteTextFileResponse> {
+    const request = params as acp.WriteTextFileRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const rawPath = readOpenCodeBridgeString(request, ["uri", "path"]);
+    if (!rawPath) {
+      throw new Error("OpenCode ACP client bridge writeTextFile requires a path.");
+    }
+    const content = params.content;
+    const fallbackCwd = context.session.cwd ?? process.cwd();
+    const resolvedPath = resolveOpenCodeBridgePath({
+      rawPath,
+      fallbackCwd,
+    });
+    await mkdir(dirname(resolvedPath), { recursive: true });
+    await writeFile(resolvedPath, content, "utf8");
+    return {};
+  }
+
+  private async openCodeBridgeCreateTerminal(
+    context: OpenCodeSessionContext,
+    params: acp.CreateTerminalRequest,
+  ): Promise<acp.CreateTerminalResponse> {
+    const request = params as acp.CreateTerminalRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const command = readOpenCodeBridgeString(request, ["command"]);
+    if (!command) {
+      throw new Error("OpenCode ACP client bridge createTerminal requires a command.");
+    }
+    const args = params.args ?? [];
+    const fallbackCwd = context.session.cwd ?? process.cwd();
+    const requestedCwd = readOpenCodeBridgeString(request, ["cwd"]);
+    const cwd = requestedCwd
+      ? resolveOpenCodeBridgePath({ rawPath: requestedCwd, fallbackCwd })
+      : fallbackCwd;
+    const envOverrides = Object.fromEntries(
+      (params.env ?? [])
+        .map((entry) => [entry.name.trim(), entry.value] as const)
+        .filter(([name]) => name.length > 0),
+    );
+    const child = spawn(command, args, {
+      cwd,
+      env: {
+        ...process.env,
+        ...envOverrides,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: process.platform === "win32",
+    });
+    const terminalId = `draft-opencode-terminal-${context.nextBridgeTerminalOrdinal}-${randomUUID()}`;
+    context.nextBridgeTerminalOrdinal += 1;
+
+    let resolveWaitForExit: (status: acp.TerminalExitStatus) => void = () => undefined;
+    const waitForExit = new Promise<acp.TerminalExitStatus>((resolvePromise) => {
+      resolveWaitForExit = resolvePromise;
+    });
+    const terminal: OpenCodeBridgeTerminalState = {
+      terminalId,
+      child,
+      output: "",
+      truncated: false,
+      exitStatus: undefined,
+      waitForExit,
+      resolveWaitForExit,
+    };
+    context.bridgeTerminals.set(terminalId, terminal);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      appendOpenCodeTerminalOutput(terminal, chunk);
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      appendOpenCodeTerminalOutput(terminal, chunk);
+    });
+    child.once("exit", (code, signal) => {
+      this.resolveOpenCodeBridgeTerminalExit(terminal, toOpenCodeTerminalExitStatus(code, signal));
+    });
+    child.once("error", (error) => {
+      appendOpenCodeTerminalOutput(terminal, `${toMessage(error, "Terminal failed to start.")}\n`);
+      this.resolveOpenCodeBridgeTerminalExit(terminal, { exitCode: 1 });
+    });
+    return { terminalId };
+  }
+
+  private async openCodeBridgeTerminalOutput(
+    context: OpenCodeSessionContext,
+    params: acp.TerminalOutputRequest,
+  ): Promise<acp.TerminalOutputResponse> {
+    const request = params as acp.TerminalOutputRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const terminalId = readOpenCodeBridgeString(request, ["terminalId"]);
+    if (!terminalId) {
+      throw new Error("OpenCode ACP client bridge terminalOutput requires terminalId.");
+    }
+    const terminal = this.getOpenCodeBridgeTerminalOrThrow(context, terminalId);
+    return terminal.exitStatus
+      ? { output: terminal.output, truncated: terminal.truncated, exitStatus: terminal.exitStatus }
+      : { output: terminal.output, truncated: terminal.truncated };
+  }
+
+  private async openCodeBridgeWaitForTerminalExit(
+    context: OpenCodeSessionContext,
+    params: acp.WaitForTerminalExitRequest,
+  ): Promise<acp.WaitForTerminalExitResponse> {
+    const request = params as acp.WaitForTerminalExitRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const terminalId = readOpenCodeBridgeString(request, ["terminalId"]);
+    if (!terminalId) {
+      throw new Error("OpenCode ACP client bridge waitForTerminalExit requires terminalId.");
+    }
+    const terminal = this.getOpenCodeBridgeTerminalOrThrow(context, terminalId);
+    const exitStatus = terminal.exitStatus ?? (await terminal.waitForExit);
+    return { ...exitStatus };
+  }
+
+  private async openCodeBridgeKillTerminal(
+    context: OpenCodeSessionContext,
+    params: acp.KillTerminalRequest,
+  ): Promise<acp.KillTerminalResponse> {
+    const request = params as acp.KillTerminalRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const terminalId = readOpenCodeBridgeString(request, ["terminalId"]);
+    if (!terminalId) {
+      throw new Error("OpenCode ACP client bridge killTerminal requires terminalId.");
+    }
+    const terminal = this.getOpenCodeBridgeTerminalOrThrow(context, terminalId);
+    if (!terminal.exitStatus) {
+      this.resolveOpenCodeBridgeTerminalExit(terminal, {
+        signal: "SIGTERM",
+      });
+      killChildTree(terminal.child);
+    }
+    return {};
+  }
+
+  private async openCodeBridgeReleaseTerminal(
+    context: OpenCodeSessionContext,
+    params: acp.ReleaseTerminalRequest,
+  ): Promise<acp.ReleaseTerminalResponse> {
+    const request = params as acp.ReleaseTerminalRequest & Record<string, unknown>;
+    this.ensureOpenCodeBridgeSession(context, request);
+    const terminalId = readOpenCodeBridgeString(request, ["terminalId"]);
+    if (!terminalId) {
+      throw new Error("OpenCode ACP client bridge releaseTerminal requires terminalId.");
+    }
+    const terminal = context.bridgeTerminals.get(terminalId);
+    if (!terminal) {
+      return {};
+    }
+    if (!terminal.exitStatus) {
+      this.resolveOpenCodeBridgeTerminalExit(terminal, {
+        signal: "SIGTERM",
+      });
+      killChildTree(terminal.child);
+    }
+    context.bridgeTerminals.delete(terminalId);
+    return {};
   }
 
   private updateSession(
@@ -332,6 +886,96 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
         message,
       },
     });
+  }
+
+  private emitTurnFailed(input: {
+    readonly context: OpenCodeSessionContext;
+    readonly turnId: TurnId;
+    readonly message: string;
+    readonly recoverable: boolean;
+  }) {
+    this.emitRuntimeEvent({
+      ...this.createEventBase(input.context),
+      turnId: input.turnId,
+      type: "turn.completed",
+      payload: {
+        state: "failed",
+        stopReason: null,
+        errorMessage: input.message,
+      },
+    });
+    this.emitRuntimeError(input.context, input.message, input.turnId);
+    this.updateSession(input.context, {
+      status: input.recoverable ? "ready" : "error",
+      activeTurnId: undefined,
+      lastError: input.message,
+    });
+  }
+
+  private async promptWithWatchdog(input: {
+    readonly context: OpenCodeSessionContext;
+    readonly turnId: TurnId;
+    readonly phase: OpenCodePromptPhase;
+    readonly promptText: string;
+  }) {
+    const label =
+      input.phase === "retry" ? "OpenCode ACP retry prompt" : "OpenCode ACP prompt";
+
+    try {
+      return await withTimeout({
+        label,
+        timeoutMs: input.context.promptTimeoutMs,
+        promise: input.context.connection.prompt({
+          sessionId: input.context.acpSessionId,
+          prompt: [
+            {
+              type: "text",
+              text: input.promptText,
+            },
+          ],
+        }),
+      });
+    } catch (error) {
+      if (!isTimeoutError(error)) {
+        throw error;
+      }
+
+      let cancelErrorMessage: string | undefined;
+      try {
+        await input.context.connection.cancel({ sessionId: input.context.acpSessionId });
+      } catch (cancelError) {
+        cancelErrorMessage = toMessage(
+          cancelError,
+          "Failed to cancel timed-out OpenCode prompt.",
+        );
+      }
+
+      const phaseLabel =
+        input.phase === "retry" ? "OpenCode retry prompt" : "OpenCode prompt";
+      this.emitRuntimeEvent({
+        ...this.createEventBase(input.context),
+        turnId: input.turnId,
+        type: "runtime.warning",
+        payload: {
+          message: `${phaseLabel} timed out after ${input.context.promptTimeoutMs}ms. Attempting cancellation.`,
+          detail: {
+            phase: input.phase,
+            timeoutMs: input.context.promptTimeoutMs,
+            ...(cancelErrorMessage ? { cancelError: cancelErrorMessage } : {}),
+          },
+        },
+      });
+
+      const message = cancelErrorMessage
+        ? `${phaseLabel} timed out after ${input.context.promptTimeoutMs}ms. Draft attempted to cancel the in-flight request, but OpenCode returned: ${cancelErrorMessage}`
+        : `${phaseLabel} timed out after ${input.context.promptTimeoutMs}ms. Draft cancelled the in-flight request so you can retry this turn.`;
+      throw new OpenCodePromptTimeoutError({
+        message,
+        timeoutMs: input.context.promptTimeoutMs,
+        phase: input.phase,
+        cause: error,
+      });
+    }
   }
 
   private resolvePendingApprovalsAsCancelled(context: OpenCodeSessionContext) {
@@ -468,6 +1112,24 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
             ...(params.update.content ? { data: { content: params.update.content } } : {}),
           },
         });
+        if (status === "failed") {
+          const failureMessage = [
+            nextSnapshot.title,
+            summarizeToolContent(params.update.content),
+            stringifyOpenCodeToolContent(params.update.content),
+          ]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join("\n")
+            .trim()
+            .slice(0, 2_000);
+          const failureKind = classifyOpenCodeToolInvocationFailure(failureMessage);
+          if (failureKind) {
+            context.lastToolSchemaFailure = {
+              kind: failureKind,
+              message: failureMessage,
+            };
+          }
+        }
         return;
       }
 
@@ -535,6 +1197,7 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
       }
 
       this.resolvePendingApprovalsAsCancelled(context);
+      this.disposeOpenCodeBridgeTerminals(context);
       this.updateSession(context, {
         status: "closed",
       });
@@ -580,7 +1243,10 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
     const availableModelIds = readAvailableOpenCodeModelIds(context.models);
     if (availableModelIds.length > 0 && !availableModelIds.includes(model)) {
       throw new Error(
-        `OpenCode does not expose model '${model}' for this session. Available models: ${availableModelIds.join(", ")}.`,
+        buildOpenCodeUnavailableModelMessage({
+          model,
+          availableModelIds,
+        }),
       );
     }
 
@@ -626,11 +1292,21 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
     };
 
     const opencodeBinaryPath = input.providerOptions?.opencode?.binaryPath ?? "opencode";
+    const promptTimeoutMs = normalizeOpenCodePromptTimeoutMs(
+      input.providerOptions?.opencode?.promptTimeoutMs,
+    );
+    const useClientToolBridge = isOpenCodeClientToolBridgeEnabled(input.providerOptions);
     const args = buildOpenCodeCliArgs({ cwd: resolvedCwd });
     const env = buildOpenCodeCliEnv({
       runtimeMode: input.runtimeMode,
       ...(input.providerOptions?.opencode?.openRouterApiKey
         ? { openRouterApiKey: input.providerOptions.opencode.openRouterApiKey }
+        : {}),
+      ...(input.providerOptions?.opencode?.configContent
+        ? { configContent: input.providerOptions.opencode.configContent }
+        : {}),
+      ...(input.providerOptions?.opencode?.envOverrides
+        ? { envOverrides: input.providerOptions.opencode.envOverrides }
         : {}),
     });
 
@@ -657,6 +1333,52 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
         }
         this.handleSessionUpdate(context, params);
       },
+      ...(useClientToolBridge
+        ? {
+            readTextFile: async (params: acp.ReadTextFileRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge readTextFile is unavailable.");
+              }
+              return this.openCodeBridgeReadTextFile(context, params);
+            },
+            writeTextFile: async (params: acp.WriteTextFileRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge writeTextFile is unavailable.");
+              }
+              return this.openCodeBridgeWriteTextFile(context, params);
+            },
+            createTerminal: async (params: acp.CreateTerminalRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge createTerminal is unavailable.");
+              }
+              return this.openCodeBridgeCreateTerminal(context, params);
+            },
+            terminalOutput: async (params: acp.TerminalOutputRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge terminalOutput is unavailable.");
+              }
+              return this.openCodeBridgeTerminalOutput(context, params);
+            },
+            waitForTerminalExit: async (params: acp.WaitForTerminalExitRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge waitForTerminalExit is unavailable.");
+              }
+              return this.openCodeBridgeWaitForTerminalExit(context, params);
+            },
+            killTerminal: async (params: acp.KillTerminalRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge killTerminal is unavailable.");
+              }
+              return this.openCodeBridgeKillTerminal(context, params);
+            },
+            releaseTerminal: async (params: acp.ReleaseTerminalRequest) => {
+              if (!context || !context.bridgeEnabled) {
+                throw new Error("OpenCode ACP client bridge releaseTerminal is unavailable.");
+              }
+              return this.openCodeBridgeReleaseTerminal(context, params);
+            },
+          }
+        : {}),
     };
 
     const connection = new acp.ClientSideConnection(() => client, stream);
@@ -666,11 +1388,16 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
       connection,
       acpSessionId: "",
       models: null,
+      promptTimeoutMs,
       pendingApprovals: new Map(),
       toolSnapshots: new Map(),
       currentTurnId: undefined,
       turnInFlight: false,
       stopping: false,
+      bridgeEnabled: useClientToolBridge,
+      bridgeTerminals: new Map(),
+      nextBridgeTerminalOrdinal: 1,
+      lastToolSchemaFailure: undefined,
     };
     this.startingSessions.set(input.threadId, context);
     this.attachProcessListeners(context);
@@ -681,7 +1408,9 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
         timeoutMs: OPENCODE_ACP_INITIALIZE_TIMEOUT_MS,
         promise: connection.initialize({
           protocolVersion: acp.PROTOCOL_VERSION,
-          clientCapabilities: {},
+          clientCapabilities: buildOpenCodeClientCapabilities({
+            useClientToolBridge,
+          }),
         }),
       });
 
@@ -726,11 +1455,7 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
       });
 
       const requestedModel = normalizeRequestedOpenCodeModel(input.model);
-      if (
-        requestedModel &&
-        requestedModel !== context.session.model &&
-        isOpenCodeModelAvailable(context.models, requestedModel)
-      ) {
+      if (requestedModel && requestedModel !== context.session.model) {
         await this.setSessionModel(context, requestedModel);
       }
 
@@ -786,13 +1511,12 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
     }
 
     context.turnInFlight = true;
+    context.lastToolSchemaFailure = undefined;
 
     try {
       const requestedModel = normalizeRequestedOpenCodeModel(input.model);
       if (requestedModel && requestedModel !== context.session.model) {
-        if (isOpenCodeModelAvailable(context.models, requestedModel)) {
-          await this.setSessionModel(context, requestedModel);
-        }
+        await this.setSessionModel(context, requestedModel);
       }
 
       const turnId = TurnId.makeUnsafe(randomUUID());
@@ -809,17 +1533,7 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
         payload: context.session.model ? { model: context.session.model } : {},
       });
 
-      try {
-        const result = await context.connection.prompt({
-          sessionId: context.acpSessionId,
-          prompt: [
-            {
-              type: "text",
-              text: promptText,
-            },
-          ],
-        });
-
+      const completeTurn = (result: { stopReason: string | null; usage?: unknown }) => {
         this.emitRuntimeEvent({
           ...this.createEventBase(context),
           turnId,
@@ -830,40 +1544,115 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
             ...(result.usage ? { usage: result.usage } : {}),
           },
         });
-
         this.updateSession(context, {
           status: "ready",
           activeTurnId: undefined,
+          lastError: undefined,
         });
-
         return {
           threadId: input.threadId,
           turnId,
           resumeCursor: { sessionId: context.acpSessionId },
-        };
-      } catch (error) {
-        const message = toMessage(error, "OpenCode turn failed.");
-        this.emitRuntimeEvent({
-          ...this.createEventBase(context),
+        } satisfies ProviderTurnStartResult;
+      };
+      let toolFailureRetryAttempted = false;
+      let retriedFailureKind: OpenCodeToolInvocationFailureKind | null = null;
+      const attemptToolFailureRetry = async (input: {
+        readonly failure: OpenCodeToolSchemaFailure | undefined;
+        readonly fallbackMessage: string;
+      }): Promise<ProviderTurnStartResult | undefined> => {
+        const retrySourceMessage = input.failure?.message ?? input.fallbackMessage;
+        const failureKind =
+          input.failure?.kind ?? classifyOpenCodeToolInvocationFailure(retrySourceMessage);
+        if (!failureKind) {
+          return undefined;
+        }
+        if (toolFailureRetryAttempted) {
+          if (retriedFailureKind === "unavailable" && failureKind === "unavailable") {
+            this.emitOpenCodeRetrySuppressedWarning(
+              context,
+              turnId,
+              failureKind,
+              retrySourceMessage,
+            );
+          }
+          return undefined;
+        }
+        const recoveryPrompt = buildOpenCodeToolSchemaRecoveryPrompt({
+          rawMessage: retrySourceMessage,
+          originalUserRequest: promptText,
+        });
+        if (!recoveryPrompt) {
+          return undefined;
+        }
+        toolFailureRetryAttempted = true;
+        retriedFailureKind = failureKind;
+        this.emitOpenCodeToolRetryWarning(context, turnId, failureKind, retrySourceMessage);
+        const retryResult = await this.promptWithWatchdog({
+          context,
           turnId,
-          type: "turn.completed",
-          payload: {
-            state: "failed",
-            stopReason: null,
-            errorMessage: message,
-          },
+          phase: "retry",
+          promptText: recoveryPrompt,
         });
-        this.emitRuntimeError(context, message, turnId);
-        this.updateSession(context, {
-          status: "error",
-          activeTurnId: undefined,
-          lastError: message,
+        return completeTurn(retryResult);
+      };
+
+      try {
+        const result = await this.promptWithWatchdog({
+          context,
+          turnId,
+          phase: "primary",
+          promptText,
         });
-        throw new Error(message, { cause: error });
+
+        const streamedToolSchemaFailure = this.consumeOpenCodeToolSchemaFailure(context);
+        if (streamedToolSchemaFailure) {
+          const retryResult = await attemptToolFailureRetry({
+            failure: streamedToolSchemaFailure,
+            fallbackMessage: streamedToolSchemaFailure.message,
+          });
+          if (retryResult) {
+            return retryResult;
+          }
+        }
+
+        return completeTurn(result);
+      } catch (error) {
+        let message = toMessage(error, "OpenCode turn failed.");
+        let recoverable = isOpenCodePromptTimeoutError(error);
+        let failureCause: unknown = error;
+        if (!recoverable) {
+          const streamedToolSchemaFailure = this.consumeOpenCodeToolSchemaFailure(context);
+          try {
+            const retryResult = await attemptToolFailureRetry({
+              failure: streamedToolSchemaFailure,
+              fallbackMessage: message,
+            });
+            if (retryResult) {
+              return retryResult;
+            }
+          } catch (retryError) {
+            const retryMessage = toMessage(
+              retryError,
+              "Automatic retry after tool-call failure failed.",
+            );
+            message = `${message} Automatic retry failed: ${retryMessage}`;
+            recoverable = isOpenCodePromptTimeoutError(retryError);
+            failureCause = retryError;
+          }
+        }
+        this.emitTurnFailed({
+          context,
+          turnId,
+          message,
+          recoverable,
+        });
+        throw new Error(message, { cause: failureCause });
       }
     } finally {
       context.currentTurnId = undefined;
       context.turnInFlight = false;
+      context.lastToolSchemaFailure = undefined;
     }
   }
 
@@ -926,6 +1715,7 @@ export class OpenCodeAcpManager extends EventEmitter<OpenCodeAcpManagerEvents> {
   private async disposeContext(context: OpenCodeSessionContext): Promise<void> {
     context.stopping = true;
     this.resolvePendingApprovalsAsCancelled(context);
+    this.disposeOpenCodeBridgeTerminals(context);
     try {
       await context.connection.cancel({ sessionId: context.acpSessionId });
     } catch {

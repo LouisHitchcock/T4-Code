@@ -1545,6 +1545,9 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        structuredUserInput: "supported",
+        readThread: "supported",
+        rollbackThread: "supported",
       },
       startSession,
       sendTurn,

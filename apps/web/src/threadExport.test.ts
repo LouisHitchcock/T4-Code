@@ -9,6 +9,7 @@ const project: Project = {
   id: ProjectId.makeUnsafe("project-export"),
   name: "Export Project",
   cwd: "/tmp/export-project",
+  provider: "codex",
   model: "gpt-5-codex",
   expanded: true,
   scripts: [],

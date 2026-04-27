@@ -22,6 +22,13 @@ function trimSecret(value: string | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+function toPersistablePromptTimeoutMs(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return undefined;
+  }
+  return value >= 1 && value <= 900_000 ? value : undefined;
+}
+
 export function sanitizeProviderOptionsForPersistence(
   providerOptions: ProviderStartOptions | undefined,
 ): ProviderStartOptions | undefined {
@@ -32,9 +39,23 @@ export function sanitizeProviderOptionsForPersistence(
   const kimi = providerOptions.kimi?.binaryPath
     ? { kimi: { binaryPath: providerOptions.kimi.binaryPath } }
     : {};
-  const opencode = providerOptions.opencode?.binaryPath
-    ? { opencode: { binaryPath: providerOptions.opencode.binaryPath } }
-    : {};
+  const opencodeBinaryPath = providerOptions.opencode?.binaryPath;
+  const opencodePromptTimeoutMs = toPersistablePromptTimeoutMs(
+    providerOptions.opencode?.promptTimeoutMs,
+  );
+  const opencodeUseClientToolBridge = providerOptions.opencode?.useClientToolBridge === true;
+  const opencode =
+    opencodeBinaryPath || opencodePromptTimeoutMs !== undefined || opencodeUseClientToolBridge
+      ? {
+          opencode: {
+            ...(opencodeBinaryPath ? { binaryPath: opencodeBinaryPath } : {}),
+            ...(opencodePromptTimeoutMs !== undefined
+              ? { promptTimeoutMs: opencodePromptTimeoutMs }
+              : {}),
+            ...(opencodeUseClientToolBridge ? { useClientToolBridge: true } : {}),
+          },
+        }
+      : {};
   const next = {
     ...(providerOptions.codex
       ? {
@@ -100,6 +121,13 @@ export function sanitizeProviderOptionsRecordForPersistence(
     const opencode: Record<string, unknown> = {};
     if (typeof providerOptions.opencode.binaryPath === "string") {
       opencode.binaryPath = providerOptions.opencode.binaryPath;
+    }
+    const promptTimeoutMs = toPersistablePromptTimeoutMs(providerOptions.opencode.promptTimeoutMs);
+    if (promptTimeoutMs !== undefined) {
+      opencode.promptTimeoutMs = promptTimeoutMs;
+    }
+    if (providerOptions.opencode.useClientToolBridge === true) {
+      opencode.useClientToolBridge = true;
     }
     if (Object.keys(opencode).length > 0) {
       next.opencode = opencode;

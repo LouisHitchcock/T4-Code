@@ -35,6 +35,9 @@ export const MAX_CHAT_BACKGROUND_IMAGE_DATA_URL_LENGTH = 1_500_000;
 export const MAX_CHAT_BACKGROUND_IMAGE_BLUR_PX = 24;
 export const DEFAULT_CHAT_BACKGROUND_IMAGE_FADE_PERCENT = 64;
 export const DEFAULT_CHAT_BACKGROUND_IMAGE_BLUR_PX = 0;
+export const DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS = 300_000;
+const MIN_OPENCODE_PROMPT_TIMEOUT_MS = 1_000;
+const MAX_OPENCODE_PROMPT_TIMEOUT_MS = 900_000;
 export const TIMESTAMP_FORMAT_OPTIONS = ["locale", "12-hour", "24-hour"] as const;
 export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
@@ -97,6 +100,7 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   opencode: new Set(getModelOptions("opencode").map((option) => option.slug)),
   pi: new Set(getModelOptions("pi").map((option) => option.slug)),
 };
+const OPENCODE_ENV_OVERRIDE_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 
 const AppSettingsSchema = Schema.Struct({
   codexBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
@@ -117,6 +121,24 @@ const AppSettingsSchema = Schema.Struct({
   opencodeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
     Schema.withConstructorDefault(() => Option.some("")),
   ),
+  opencodeConfigContent: Schema.String.check(Schema.isMaxLength(250_000)).pipe(
+    Schema.withConstructorDefault(() => Option.some("")),
+  ),
+  opencodeEnvOverrides: Schema.Record(
+    Schema.String.check(
+      Schema.isMaxLength(128),
+      Schema.isPattern(OPENCODE_ENV_OVERRIDE_KEY_PATTERN),
+    ),
+    Schema.String.check(Schema.isMaxLength(4_096)),
+  )
+    .check(Schema.isMaxProperties(64))
+    .pipe(Schema.withConstructorDefault(() => Option.some({}))),
+  opencodePromptTimeoutMs: Schema.Int.check(
+    Schema.isBetween({
+      minimum: MIN_OPENCODE_PROMPT_TIMEOUT_MS,
+      maximum: MAX_OPENCODE_PROMPT_TIMEOUT_MS,
+    }),
+  ).pipe(Schema.withConstructorDefault(() => Option.some(DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS))),
   kimiBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
     Schema.withConstructorDefault(() => Option.some("")),
   ),
@@ -346,6 +368,32 @@ export function normalizeModelVisibilitySlugs(
   );
 }
 
+function clampOpenCodePromptTimeoutMs(value: number): number {
+  return Math.min(
+    MAX_OPENCODE_PROMPT_TIMEOUT_MS,
+    Math.max(MIN_OPENCODE_PROMPT_TIMEOUT_MS, Math.round(value)),
+  );
+}
+
+function normalizeOpenCodeConfigContent(value: string): string {
+  return value.trim().length > 0 ? value : "";
+}
+
+function normalizeOpenCodeEnvOverrides(value: Record<string, string>): Record<string, string> {
+  const normalizedEntries = Object.entries(value)
+    .map(([rawKey, rawValue]) => [rawKey.trim().toUpperCase(), rawValue.trim()] as const)
+    .filter(
+      ([key, envValue]) =>
+        key.length > 0 &&
+        envValue.length > 0 &&
+        key.length <= 128 &&
+        envValue.length <= 4_096 &&
+        OPENCODE_ENV_OVERRIDE_KEY_PATTERN.test(key),
+    )
+    .slice(0, 64);
+  return Object.fromEntries(normalizedEntries);
+}
+
 function normalizeAppSettings(settings: AppSettings): AppSettings {
   const customThemeId =
     settings.customThemeId === "none" && settings.enableCatppuccinTheme
@@ -364,6 +412,9 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
     customCopilotModels: normalizeCustomModelSlugs(settings.customCopilotModels, "copilot"),
     customOpencodeModels: normalizeCustomModelSlugs(settings.customOpencodeModels, "opencode"),
+    opencodeConfigContent: normalizeOpenCodeConfigContent(settings.opencodeConfigContent),
+    opencodeEnvOverrides: normalizeOpenCodeEnvOverrides(settings.opencodeEnvOverrides),
+    opencodePromptTimeoutMs: clampOpenCodePromptTimeoutMs(settings.opencodePromptTimeoutMs),
     customKimiModels: normalizeCustomModelSlugs(settings.customKimiModels, "kimi"),
     customPiModels: normalizeCustomModelSlugs(settings.customPiModels, "pi"),
     favoriteCodexModels: normalizeModelPreferenceSlugs(

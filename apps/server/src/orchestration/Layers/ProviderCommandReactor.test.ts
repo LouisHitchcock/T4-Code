@@ -333,6 +333,83 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("does not overwrite a newer ready session with stale running state after sendTurn returns", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const readyAt = new Date(Date.now() + 60_000).toISOString();
+    let releaseSendTurn: (() => void) | undefined;
+    const sendTurnGate = new Promise<void>((resolve) => {
+      releaseSendTurn = () => resolve();
+    });
+    harness.sendTurn.mockImplementationOnce(() =>
+      Effect.promise(async () => {
+        await sendTurnGate;
+        return {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          turnId: asTurnId("turn-1"),
+        };
+      }),
+    );
+
+    const turnStartPromise = Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-no-stale-overwrite"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-no-stale-overwrite"),
+          role: "user",
+          text: "run a turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-ready-during-send-turn"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: readyAt,
+        },
+        createdAt: readyAt,
+      }),
+    );
+    if (releaseSendTurn) {
+      releaseSendTurn();
+    }
+    await turnStartPromise;
+    await harness.drain();
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.updatedAt).toBe(readyAt);
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(Effect.map((collected) => [...collected])),
+    );
+    const staleServerRunningSessionSets = events.filter(
+      (event) =>
+        event.type === "thread.session-set" &&
+        String(event.commandId).startsWith("server:provider-session-set:") &&
+        event.payload.threadId === ThreadId.makeUnsafe("thread-1") &&
+        event.payload.session.status === "running" &&
+        event.payload.session.updatedAt === now,
+    );
+    expect(staleServerRunningSessionSets).toHaveLength(0);
+  });
+
   it("keeps an explicitly requested provider instead of silently falling back", async () => {
     const now = new Date().toISOString();
     const harness = await createHarness({
@@ -417,6 +494,110 @@ describe("ProviderCommandReactor", () => {
     expect(String(sendTurnInput?.input)).toContain("Always mention the release checklist.");
     expect(String(sendTurnInput?.input)).toContain("<user_request>");
     expect(String(sendTurnInput?.input)).toContain("Ship the patch");
+  });
+  it("injects tool-execution guidance into opencode provider turn input", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-opencode-guidance"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-opencode-guidance"),
+          role: "user",
+          text: "Create a config file and run tests.",
+          attachments: [],
+        },
+        provider: "opencode",
+        model: "ollama/qwen2.5-coder:latest",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const sendTurnInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined;
+    expect(String(sendTurnInput?.input)).toContain('<tool_execution_policy provider="opencode">');
+    expect(String(sendTurnInput?.input)).toContain(
+      "Inspect repository context first: list files, read relevant code, and verify existing patterns before proposing edits.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "use tools to perform those actions instead of replying with only markdown/code snippets.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "After making changes, run the most relevant validation command(s) and use the results to decide next steps.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Use only available tool names and pass arguments that strictly match each tool schema; do not invent tool names or argument shapes.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Translate Draft tool aliases to OpenCode built-ins before calling tools: read_files -> read, file_glob -> glob/list, grep/ripgrep -> grep, run_shell_command/terminal.exec -> bash, ask_user_question -> question.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Translate Draft todo aliases to OpenCode built-ins: create_todo_list/add_todos/mark_todo_as_done/remove_todos -> todowrite, read_todos -> todoread.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Use only this OpenCode built-in allowlist: bash, read, write, edit, glob, list, grep, apply_patch, webfetch, websearch, todoread, todowrite, task, question, skill.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "For OpenCode write/edit calls, prefer `filePath` when the schema expects it",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "If model output uses XML-style tool syntax",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "For OpenCode todo tracking, use only `todowrite` (not create_todo_list/add_todos/read_todos/mark_todo_as_done/remove_todos/todolist).",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Do not substitute tutorial/example tasks from tool descriptions (for example dark mode or React optimization examples) in place of the actual user request.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Use `skill` only when the requested skill is confirmed to exist; if available skills are none, continue without `skill`.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "todowrite requires {\"todos\":[{\"content\":\"...\",\"status\":\"pending|in_progress|completed|cancelled\",\"priority\":\"high|medium|low\"}]}.",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "Use `task` only for subagent delegation and include required keys: description, prompt, subagent_type (optional task_id).",
+    );
+    expect(String(sendTurnInput?.input)).toContain(
+      "If a tool call fails with invalid arguments, schema validation, or missing-key errors, immediately retry the same task with corrected arguments.",
+    );
+    expect(String(sendTurnInput?.input)).toContain("<user_request>");
+    expect(String(sendTurnInput?.input)).toContain("Create a config file and run tests.");
+  });
+
+  it("does not inject OpenCode tool-execution guidance for codex turns", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-codex-no-opencode-guidance"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-codex-no-opencode-guidance"),
+          role: "user",
+          text: "Explain this architecture.",
+          attachments: [],
+        },
+        provider: "codex",
+        model: "gpt-5-codex",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const sendTurnInput = harness.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined;
+    expect(String(sendTurnInput?.input)).not.toContain(
+      '<tool_execution_policy provider="opencode">',
+    );
   });
 
   it("forwards codex model options through session start and turn send", async () => {
@@ -529,6 +710,80 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
       provider: "codex",
       model: "gpt-5.4",
+    });
+  });
+
+  it("restarts active OpenCode sessions when config/env/timeout options change", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const firstCommandId = CommandId.makeUnsafe("cmd-turn-start-opencode-options-initial");
+    const secondCommandId = CommandId.makeUnsafe("cmd-turn-start-opencode-options-updated");
+
+    putTransientTurnStartProviderOptions(firstCommandId, {
+      opencode: {
+        configContent: "{\"provider\":{\"ollama\":{\"options\":{\"baseURL\":\"http://localhost:11434/v1\"}}}}",
+        envOverrides: {
+          OLLAMA_HOST: "http://localhost:11434",
+        },
+        promptTimeoutMs: 120_000,
+      },
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: firstCommandId,
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-opencode-options-initial"),
+          role: "user",
+          text: "first with opencode runtime overrides",
+          attachments: [],
+        },
+        provider: "opencode",
+        model: "ollama/qwen2.5-coder:latest",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    putTransientTurnStartProviderOptions(secondCommandId, {
+      opencode: {
+        configContent: "{\"provider\":{\"ollama\":{\"options\":{\"baseURL\":\"http://localhost:11434/v1\"}}}}",
+        envOverrides: {
+          OLLAMA_HOST: "http://localhost:11434",
+        },
+        promptTimeoutMs: 180_000,
+      },
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: secondCommandId,
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-opencode-options-updated"),
+          role: "user",
+          text: "second with updated timeout",
+          attachments: [],
+        },
+        provider: "opencode",
+        model: "ollama/qwen2.5-coder:latest",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "opencode",
     });
   });
 

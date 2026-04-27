@@ -16,7 +16,11 @@ import {
   type ServerProviderStatus,
   type TurnId,
 } from "@draft/contracts";
-import { isCodexOpenRouterModel, resolveModelSlugForProvider } from "@draft/shared/model";
+import {
+  inferProviderFromModelSlug,
+  isCodexOpenRouterModel,
+  resolveModelSlugForProvider,
+} from "@draft/shared/model";
 import { Cache, Cause, Duration, Effect, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@draft/shared/DrainableWorker";
 
@@ -55,6 +59,29 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
+function resolveDesiredProviderSessionModel(input: {
+  readonly provider: ProviderKind;
+  readonly requestedModel: string | undefined;
+  readonly threadModel: string | undefined;
+}): string {
+  const explicitModel = toNonEmptyProviderInput(input.requestedModel);
+  if (explicitModel) {
+    return explicitModel;
+  }
+
+  const normalizedThreadModel = toNonEmptyProviderInput(input.threadModel);
+  if (
+    normalizedThreadModel &&
+    inferProviderFromModelSlug(normalizedThreadModel) === input.provider
+  ) {
+    return normalizedThreadModel;
+  }
+
+  return resolveModelSlugForProvider(
+    input.provider,
+    normalizedThreadModel ?? DEFAULT_MODEL_BY_PROVIDER[input.provider],
+  );
+}
 function normalizeProviderStartOptions(
   value: ProviderStartOptions | undefined,
 ): ProviderStartOptions | undefined {
@@ -74,6 +101,21 @@ function normalizeProviderStartOptions(
   const copilotBinaryPath = trimValue(value.copilot?.binaryPath);
   const opencodeBinaryPath = trimValue(value.opencode?.binaryPath);
   const opencodeOpenRouterApiKey = trimValue(value.opencode?.openRouterApiKey);
+  const opencodeConfigContent = trimValue(value.opencode?.configContent);
+  const opencodeEnvOverrides = Object.fromEntries(
+    Object.entries(value.opencode?.envOverrides ?? {})
+      .map(([rawKey, rawValue]) => [rawKey.trim(), rawValue.trim()] as const)
+      .filter(([key, envValue]) => key.length > 0 && envValue.length > 0)
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)),
+  );
+  const opencodePromptTimeoutMs =
+    typeof value.opencode?.promptTimeoutMs === "number" &&
+    Number.isInteger(value.opencode.promptTimeoutMs) &&
+    value.opencode.promptTimeoutMs >= 1 &&
+    value.opencode.promptTimeoutMs <= 900_000
+      ? value.opencode.promptTimeoutMs
+      : undefined;
+  const opencodeUseClientToolBridge = value.opencode?.useClientToolBridge === true;
   const kimiBinaryPath = trimValue(value.kimi?.binaryPath);
   const kimiApiKey = trimValue(value.kimi?.apiKey);
 
@@ -89,11 +131,24 @@ function normalizeProviderStartOptions(
         }
       : {}),
     ...(copilotBinaryPath ? { copilot: { binaryPath: copilotBinaryPath } } : {}),
-    ...(opencodeBinaryPath || opencodeOpenRouterApiKey
+    ...(opencodeBinaryPath ||
+    opencodeOpenRouterApiKey ||
+    opencodeConfigContent ||
+    Object.keys(opencodeEnvOverrides).length > 0 ||
+    opencodePromptTimeoutMs !== undefined ||
+    opencodeUseClientToolBridge
       ? {
           opencode: {
             ...(opencodeBinaryPath ? { binaryPath: opencodeBinaryPath } : {}),
             ...(opencodeOpenRouterApiKey ? { openRouterApiKey: opencodeOpenRouterApiKey } : {}),
+            ...(opencodeConfigContent ? { configContent: opencodeConfigContent } : {}),
+            ...(Object.keys(opencodeEnvOverrides).length > 0
+              ? { envOverrides: opencodeEnvOverrides }
+              : {}),
+            ...(opencodePromptTimeoutMs !== undefined
+              ? { promptTimeoutMs: opencodePromptTimeoutMs }
+              : {}),
+            ...(opencodeUseClientToolBridge ? { useClientToolBridge: true } : {}),
           },
         }
       : {}),
@@ -137,10 +192,38 @@ function applyWorkspaceAgentsInstructions(input: {
     "</user_request>",
   ].join("\n");
 }
+function buildProviderToolExecutionGuidance(provider: ProviderKind | undefined): string | null {
+  if (provider !== "opencode") {
+    return null;
+  }
+  return [
+    '<tool_execution_policy provider="opencode">',
+    "Inspect repository context first: list files, read relevant code, and verify existing patterns before proposing edits.",
+    "When a request requires reading files, editing files, creating files, or running shell commands, use tools to perform those actions instead of replying with only markdown/code snippets.",
+    "After making changes, run the most relevant validation command(s) and use the results to decide next steps.",
+    "Use only available tool names and pass arguments that strictly match each tool schema; do not invent tool names or argument shapes.",
+    "Translate Draft tool aliases to OpenCode built-ins before calling tools: read_files -> read, file_glob -> glob/list, grep/ripgrep -> grep, run_shell_command/terminal.exec -> bash, ask_user_question -> question.",
+    "Translate Draft todo aliases to OpenCode built-ins: create_todo_list/add_todos/mark_todo_as_done/remove_todos -> todowrite, read_todos -> todoread.",
+    "Use only this OpenCode built-in allowlist: bash, read, write, edit, glob, list, grep, apply_patch, webfetch, websearch, todoread, todowrite, task, question, skill.",
+    "For OpenCode write/edit calls, prefer `filePath` when the schema expects it (for example write {\"filePath\":\"notes.txt\",\"content\":\"hello\"} and edit {\"filePath\":\"src/main.cpp\",\"oldString\":\"foo\",\"newString\":\"bar\"}).",
+    "If model output uses XML-style tool syntax (for example <function=bash> <parameter=command>...</parameter>), translate it into a direct tool call like bash({\"command\":\"...\"}) and do not expose the XML in user-facing text.",
+    "For OpenCode todo tracking, use only `todowrite` (not create_todo_list/add_todos/read_todos/mark_todo_as_done/remove_todos/todolist).",
+    "Do not substitute tutorial/example tasks from tool descriptions (for example dark mode or React optimization examples) in place of the actual user request.",
+    "Use `skill` only when the requested skill is confirmed to exist; if available skills are none, continue without `skill`.",
+    "todowrite requires {\"todos\":[{\"content\":\"...\",\"status\":\"pending|in_progress|completed|cancelled\",\"priority\":\"high|medium|low\"}]}.",
+    "Use `task` only for subagent delegation and include required keys: description, prompt, subagent_type (optional task_id).",
+    "If a tool call fails with invalid arguments, schema validation, or missing-key errors, immediately retry the same task with corrected arguments.",
+    "Do not print raw tool-call JSON in assistant text; invoke tools directly.",
+    "After a tool error, continue executing the user request until it is complete or blocked; do not stop at a planning-only or apology-only response.",
+    "If the request is explanation-only and no action is needed, respond normally without forcing tool calls.",
+    "</tool_execution_policy>",
+  ].join("\n");
+}
 
 function applyThreadTurnContext(input: {
   readonly agentsContents: string | undefined;
   readonly messageText: string;
+  readonly provider: ProviderKind | undefined;
   readonly resumeSummary?: string | undefined;
   readonly selectedSkills?: ReadonlyArray<{
     readonly name: string;
@@ -148,11 +231,13 @@ function applyThreadTurnContext(input: {
     readonly contents: string;
   }>;
 }): string {
+  const toolExecutionGuidance = buildProviderToolExecutionGuidance(input.provider);
   const normalizedResumeSummary = input.resumeSummary?.trim();
   const normalizedSkills = (input.selectedSkills ?? []).filter(
     (skill) => skill.contents.trim().length > 0,
   );
   if (
+    !toolExecutionGuidance &&
     (!normalizedResumeSummary || normalizedResumeSummary.length === 0) &&
     normalizedSkills.length === 0
   ) {
@@ -192,6 +277,9 @@ function applyThreadTurnContext(input: {
       );
     }
     sections.push("</repo_skills>");
+  }
+  if (toolExecutionGuidance) {
+    sections.push(toolExecutionGuidance);
   }
   sections.push("<user_request>", userRequest, "</user_request>");
   return sections.join("\n\n");
@@ -405,6 +493,10 @@ const make = Effect.gen(function* () {
     const existingThread = readModel.threads.find((entry) => entry.id === input.threadId);
     const existingTokenUsage = existingThread?.session?.tokenUsage;
     const shouldPreserveExistingTokenUsage = input.preserveExistingTokenUsage ?? true;
+    const normalizedSessionUpdatedAt =
+      input.session.updatedAt.localeCompare(input.createdAt) >= 0
+        ? input.session.updatedAt
+        : input.createdAt;
 
     return yield* orchestrationEngine.dispatch({
       type: "thread.session.set",
@@ -412,6 +504,7 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       session: {
         ...input.session,
+        updatedAt: normalizedSessionUpdatedAt,
         ...(input.session.tokenUsage !== undefined
           ? { tokenUsage: input.session.tokenUsage }
           : shouldPreserveExistingTokenUsage && existingTokenUsage !== undefined
@@ -495,10 +588,12 @@ const make = Effect.gen(function* () {
         selectedProvider: preferredProvider,
       });
     }
-    const desiredModel = resolveModelSlugForProvider(
-      preferredProvider ?? requestedProvider ?? "codex",
-      options?.model ?? thread.model ?? DEFAULT_MODEL_BY_PROVIDER.codex,
-    );
+    const desiredProvider = preferredProvider ?? requestedProvider ?? "codex";
+    const desiredModel = resolveDesiredProviderSessionModel({
+      provider: desiredProvider,
+      requestedModel: options?.model,
+      threadModel: thread.model,
+    });
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: readModel.projects,
@@ -693,6 +788,7 @@ const make = Effect.gen(function* () {
         agentsContents:
           workspaceAgentsFile?.status === "available" ? workspaceAgentsFile.contents : undefined,
         messageText: input.messageText,
+        provider: input.provider ?? inferProviderFromModelSlug(input.model),
         ...(resumeContext ? { resumeSummary: resumeContext.summary } : {}),
         ...(selectedSkills.length > 0
           ? {
@@ -733,15 +829,22 @@ const make = Effect.gen(function* () {
     });
 
     const updatedThread = yield* resolveThread(input.threadId);
+    const hasFresherSessionUpdate =
+      updatedThread?.session !== null &&
+      updatedThread?.session !== undefined &&
+      updatedThread.session.updatedAt.localeCompare(input.createdAt) > 0;
+    if (hasFresherSessionUpdate) {
+      return;
+    }
     const sessionProvider =
-      (updatedThread?.session?.providerName === "codex" ||
+      input.provider ??
+      ((updatedThread?.session?.providerName === "codex" ||
       updatedThread?.session?.providerName === "copilot" ||
       updatedThread?.session?.providerName === "kimi" ||
       updatedThread?.session?.providerName === "opencode" ||
       updatedThread?.session?.providerName === "pi"
         ? updatedThread.session.providerName
-        : undefined) ??
-      input.provider ??
+        : undefined)) ??
       activeSession?.provider ??
       null;
     yield* setThreadSession({

@@ -123,6 +123,9 @@ export const makeCopilotAdapterLive = (options?: CopilotAdapterLiveOptions) =>
         provider: PROVIDER,
         capabilities: {
           sessionModelSwitch: "in-session",
+        structuredUserInput: "unsupported",
+        readThread: "unsupported",
+        rollbackThread: "unsupported",
         },
         startSession,
         sendTurn,

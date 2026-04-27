@@ -8,6 +8,7 @@ import {
 import type { ProjectSkillName, RuntimeMode } from "@draft/contracts";
 import { create } from "zustand";
 import type { ComposerImageAttachment } from "./composerDraftStore";
+import type { ModelSelectionSource } from "./modelSelectionSource";
 
 export type ThreadSendQueueStatus = "pending" | "sending" | "failed";
 export type ThreadFollowUpMode = "queue" | "steer";
@@ -23,6 +24,7 @@ export interface QueuedThreadTurn {
   modelOptions?: ProviderModelOptions | undefined;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  selectionSource: ModelSelectionSource;
   skillNames: ProjectSkillName[];
   createdAt: string;
   mode: ThreadFollowUpMode;

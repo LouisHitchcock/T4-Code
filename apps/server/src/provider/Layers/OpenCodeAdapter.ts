@@ -117,6 +117,9 @@ export const makeOpenCodeAdapterLive = (options?: OpenCodeAdapterLiveOptions) =>
         provider: PROVIDER,
         capabilities: {
           sessionModelSwitch: "in-session",
+          structuredUserInput: "unsupported",
+          readThread: "unsupported",
+          rollbackThread: "unsupported",
         },
         startSession,
         sendTurn,

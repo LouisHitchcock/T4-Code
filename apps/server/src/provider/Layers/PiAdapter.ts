@@ -146,6 +146,9 @@ export const makePiAdapterLive = (options?: PiAdapterLiveOptions) =>
         provider: PROVIDER,
         capabilities: {
           sessionModelSwitch: "restart-session",
+        structuredUserInput: "unsupported",
+        readThread: "supported",
+        rollbackThread: "supported",
         },
         startSession,
         sendTurn,

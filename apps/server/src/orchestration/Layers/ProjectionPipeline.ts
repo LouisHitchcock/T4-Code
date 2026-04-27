@@ -3,6 +3,7 @@ import {
   type ChatAttachment,
   type OrchestrationEvent,
 } from "@draft/contracts";
+import { inferProviderFromModelSlug } from "@draft/shared/model";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -363,6 +364,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
             defaultModel: event.payload.defaultModel,
+            defaultProvider:
+              event.payload.defaultProvider ??
+              (event.payload.defaultModel !== null
+                ? inferProviderFromModelSlug(event.payload.defaultModel)
+                : null),
             scripts: event.payload.scripts,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
@@ -386,6 +392,16 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             ...(event.payload.defaultModel !== undefined
               ? { defaultModel: event.payload.defaultModel }
               : {}),
+            ...(event.payload.defaultProvider !== undefined
+              ? { defaultProvider: event.payload.defaultProvider }
+              : event.payload.defaultModel !== undefined
+                ? {
+                    defaultProvider:
+                      event.payload.defaultModel !== null
+                        ? inferProviderFromModelSlug(event.payload.defaultModel)
+                        : null,
+                  }
+                : {}),
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
             updatedAt: event.payload.updatedAt,
           });
@@ -754,6 +770,15 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       if (event.type !== "thread.session-set") {
         return;
       }
+      const existingSession = yield* projectionThreadSessionRepository.getByThreadId({
+        threadId: event.payload.threadId,
+      });
+      if (
+        Option.isSome(existingSession) &&
+        existingSession.value.updatedAt.localeCompare(event.payload.session.updatedAt) > 0
+      ) {
+        return;
+      }
       yield* projectionThreadSessionRepository.upsert({
         threadId: event.payload.threadId,
         status: event.payload.session.status,
@@ -787,6 +812,15 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         }
 
         case "thread.session-set": {
+          const existingSession = yield* projectionThreadSessionRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (
+            Option.isSome(existingSession) &&
+            existingSession.value.updatedAt.localeCompare(event.payload.session.updatedAt) > 0
+          ) {
+            return;
+          }
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
             return;

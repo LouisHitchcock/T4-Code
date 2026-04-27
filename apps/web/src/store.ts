@@ -7,6 +7,7 @@ import {
   type OrchestrationSessionStatus,
 } from "@draft/contracts";
 import {
+  inferProviderFromModelSlug,
   isKnownModelSlug,
   isLegacyModelSlug,
   normalizeModelSlug,
@@ -133,21 +134,36 @@ function mapProjectsFromReadModel(
     persistedProjectOrderCwds.map((cwd, index) => [cwd, index] as const),
   );
   const usePersistedOrder = previous.length === 0;
-  const readProjectDefaultModel = (defaultModel: string | null | undefined): string => {
+  const readProjectDefaultProvider = (
+    defaultProvider: OrchestrationReadModel["projects"][number]["defaultProvider"],
+    defaultModel: string | null | undefined,
+  ): ProviderKind => {
+    const normalizedProvider = normalizeProviderKind(defaultProvider);
+    if (normalizedProvider) {
+      return normalizedProvider;
+    }
+    return inferProviderFromModelSlug(defaultModel);
+  };
+  const readProjectDefaultModel = (
+    defaultModel: string | null | undefined,
+    provider: ProviderKind,
+  ): string => {
     if (typeof defaultModel !== "string") {
-      return DEFAULT_MODEL_BY_PROVIDER.codex;
+      return DEFAULT_MODEL_BY_PROVIDER[provider];
     }
     const trimmed = defaultModel.trim();
-    return trimmed.length > 0 ? trimmed : DEFAULT_MODEL_BY_PROVIDER.codex;
+    return trimmed.length > 0 ? trimmed : DEFAULT_MODEL_BY_PROVIDER[provider];
   };
 
   const mappedProjects = incoming.map((project) => {
     const existing = previousById.get(project.id) ?? previousByCwd.get(project.workspaceRoot);
+    const provider = readProjectDefaultProvider(project.defaultProvider, project.defaultModel);
     return {
       id: project.id,
       name: project.title,
       cwd: project.workspaceRoot,
-      model: readProjectDefaultModel(project.defaultModel),
+      provider,
+      model: readProjectDefaultModel(project.defaultModel, provider),
       expanded:
         existing?.expanded ??
         (persistedExpandedProjectCwds.size > 0
